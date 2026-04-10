@@ -431,6 +431,10 @@ tr:hover td { background: #f9f5ef; }
 
 #gen-warning { font-size: 12px; color: var(--accent); }
 #progress-section { display: none; }
+#draft-preview-section { display: none; }
+.draft-table-wrap { overflow-x: auto; max-height: 320px; overflow-y: auto; border-radius: 7px; border: 1px solid var(--border); }
+.draft-table-wrap table td { font-size: 11px; padding: 7px 10px; border-bottom: 1px solid var(--cream); vertical-align: top; }
+.draft-body-snippet { color: var(--muted); font-style: italic; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
@@ -668,14 +672,14 @@ tr:hover td { background: #f9f5ef; }
             <div class="proof-step-num active" id="psn3">3</div>
             <div class="proof-step-body">
               <strong>Generate &amp; Send Proof</strong>
-              <p>Generates all emails, then sends a <strong>[PROOF]</strong> copy of the first recipient's personalised email to <strong>hegertonsmith@cultwines.com</strong> so you can review it before sending to anyone else.</p>
+              <p>Generates all emails, then sends a <strong>[PROOF]</strong> copy of the first recipient's personalised email to <strong><span id="proof-email-display"></span></strong> so you can review it before sending to anyone else.</p>
               <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <button class="btn btn-primary" id="btn-generate" onclick="generateAndSendProof()">⚡ Generate &amp; Send Proof</button>
                 <button class="btn btn-outline" onclick="resetAll()">↺ Reset</button>
                 <span id="gen-warning"></span>
               </div>
               <div class="proof-sent-box" id="proof-sent-box" style="margin-top:10px;">
-                ✓ Proof sent to hegertonsmith@cultwines.com — check your inbox, then click Send All below.
+                ✓ Proof sent to <span id="proof-sent-display"></span> — check your inbox, then click Send All below.
               </div>
             </div>
           </div>
@@ -694,6 +698,23 @@ tr:hover td { background: #f9f5ef; }
             </div>
           </div>
 
+        </div>
+      </div>
+    </div>
+
+    <!-- Draft Preview -->
+    <div class="section-card" id="draft-preview-section">
+      <div class="card-header">
+        <h3>Draft Preview</h3>
+        <span class="badge" id="draft-count-badge">0 drafts</span>
+      </div>
+      <div class="card-body">
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">Review all generated emails. Verify each recipient has the correct name, email, subject and body before sending.</p>
+        <div class="draft-table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Supplier</th><th>To (Email)</th><th>Subject</th><th>Body Preview</th></tr></thead>
+            <tbody id="draft-preview-tbody"></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -773,10 +794,10 @@ tr:hover td { background: #f9f5ef; }
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONFIGURATION — edit these constants to adapt the tool
 // ═══════════════════════════════════════════════════════════════════════════════
-const PROOF_EMAIL  = 'hegertonsmith@cultwines.com';
+const PROOF_EMAIL  = 'hegertonsmith' + '@' + 'cultwines.com';
 const MS_CLIENT_ID = 'dd4f1e8b-905c-4d47-8adb-29b071a2aee3';
 const MS_TENANT_ID = 'be753f7a-5a0a-4bc2-ac71-5aeba08f237f';
-const MS_REDIRECT  = 'https://hhkes.github.io/mailmerge';   // Must exactly match Azure AD registered redirect URI
+const MS_REDIRECT  = 'https://hhkes.github.io/mailmerge';
 const MS_SCOPE     = 'Mail.Send User.Read';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -829,8 +850,7 @@ let editingSigId  = null;  // null = creating new
   document.querySelector('header').style.display = 'none';
   document.querySelector('.app').style.display    = 'none';
 
-  const MAIN_ORIGIN = 'https://hhkes.github.io';
-  const TOKEN_URL   = 'https://login.microsoftonline.com/' + MS_TENANT_ID + '/oauth2/v2.0/token';
+  const TOKEN_URL = 'https://login.microsoftonline.com/' + MS_TENANT_ID + '/oauth2/v2.0/token';
 
   function authShowError(msg) {
     document.getElementById('auth-spinner').style.display = 'none';
@@ -838,25 +858,25 @@ let editingSigId  = null;  // null = creating new
     const e = document.createElement('p');
     e.className = 'auth-err'; e.textContent = msg;
     overlay.appendChild(e);
-  }
-
-  function postAndClose(data) {
-    if (window.opener && !window.opener.closed) {
-      try { window.opener.postMessage(Object.assign({ type: 'MS_AUTH_TOKEN' }, data), MAIN_ORIGIN); } catch(e) {}
-    }
-    setTimeout(function() { window.close(); }, 200);
+    // Add a link to return to the app
+    const link = document.createElement('a');
+    link.href = MS_REDIRECT;
+    link.textContent = 'Back to MailMerge';
+    link.style.cssText = 'color:#8bc4a8;margin-top:12px;font-size:14px;';
+    overlay.appendChild(link);
   }
 
   if (error) {
     const desc = params.get('error_description') || error;
+    try { sessionStorage.setItem('mm_auth_error', desc); } catch(e) {}
     authShowError(desc);
-    postAndClose({ error: error, error_description: desc });
+    setTimeout(function() { window.location.href = MS_REDIRECT; }, 3000);
     return;
   }
 
   if (!verifier) {
-    authShowError('Missing verifier — please close this window and try again.');
-    postAndClose({ error: 'missing_verifier', error_description: 'No PKCE verifier in state param.' });
+    authShowError('Missing verifier — please try connecting again.');
+    setTimeout(function() { window.location.href = MS_REDIRECT; }, 3000);
     return;
   }
 
@@ -880,16 +900,24 @@ let editingSigId  = null;  // null = creating new
     const json = await resp.json();
 
     if (json.access_token) {
-      document.getElementById('auth-msg').textContent = 'Signed in — closing...';
-      postAndClose({ access_token: json.access_token });
+      document.getElementById('auth-msg').textContent = 'Signed in — redirecting...';
+      // Store token + timestamp in sessionStorage, then redirect to clean URL
+      try {
+        sessionStorage.setItem('mm_access_token', json.access_token);
+        sessionStorage.setItem('mm_token_time', String(Date.now()));
+      } catch(e) {}
+      window.location.href = MS_REDIRECT;
     } else {
       const errMsg = json.error_description || json.error || 'Token exchange failed';
+      try { sessionStorage.setItem('mm_auth_error', errMsg); } catch(e) {}
       authShowError(errMsg);
-      postAndClose({ error: json.error || 'token_exchange_failed', error_description: errMsg });
+      setTimeout(function() { window.location.href = MS_REDIRECT; }, 4000);
     }
   } catch(e) {
-    authShowError('Network error: ' + e.message);
-    postAndClose({ error: 'network_error', error_description: e.message });
+    const errMsg = 'Network error: ' + e.message;
+    try { sessionStorage.setItem('mm_auth_error', errMsg); } catch(e2) {}
+    authShowError(errMsg);
+    setTimeout(function() { window.location.href = MS_REDIRECT; }, 4000);
   }
 })();
 
@@ -937,29 +965,29 @@ function loadFormState() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// MICROSOFT AUTH — PKCE flow
+// MICROSOFT AUTH — PKCE flow (redirect-based)
 // ─────────────────────────────────────────────────────────────────────────────
-// Uses Authorization Code + PKCE (RFC 7636). The implicit flow
-// (response_type=token) is deprecated by Microsoft for work accounts.
+// Uses Authorization Code + PKCE (RFC 7636) with full-page redirect.
 //
 // Flow:
 //   1. handleMsAuth() generates verifier + challenge via generatePkce()
-//   2. Opens a popup to Microsoft's /authorize endpoint
-//      - verifier is passed in the OAuth `state` param (not sessionStorage —
-//        sessionStorage is NOT shared between windows)
-//   3. Microsoft authenticates the user, redirects popup back to this page
+//   2. Saves form state to localStorage, then redirects the page to
+//      Microsoft's /authorize endpoint with the PKCE challenge
+//      - verifier is passed in the OAuth `state` param
+//   3. Microsoft authenticates the user, redirects back to this page
 //      with ?code=...&state=<verifier>
-//   4. The OAuth redirect handler above (handleOAuthRedirect) runs in the popup,
-//      POSTs to /token to exchange code+verifier for access_token, then
-//      window.opener.postMessage({ type:'MS_AUTH_TOKEN', access_token })
-//   5. The message listener below receives the token, stores it, fetches email
+//   4. The handleOAuthRedirect IIFE (top of script) exchanges the code for
+//      an access_token, stores it in sessionStorage, and redirects to the
+//      clean app URL
+//   5. window.onload detects the stored token, restores form state, and
+//      calls fetchUserEmail()
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// CC/BCC helper — parse comma-separated email string into Graph API recipient array
+// CC/BCC helper
 function parseEmailList(str) {
   if (!str || !str.trim()) return [];
-  return str.split(',').map(e => e.trim()).filter(e => e.includes('@'))
-    .map(e => ({ emailAddress: { address: e } }));
+  return str.split(',').map(function(e){ return e.trim(); }).filter(function(e){ return e.includes('@'); })
+    .map(function(e){ return { emailAddress: { address: e } }; });
 }
 
 // PKCE helpers — all operations stay in Uint8Array domain, never mix string/buffer
@@ -977,45 +1005,37 @@ async function generatePkce() {
   return { verifier, challenge };
 }
 
-// Message listener — receives token from popup after code exchange
-window.addEventListener('message', function(event) {
-  const allowedOrigin = 'https://hhkes.github.io';
-  if (event.origin !== allowedOrigin) return;
-  if (!event.data || event.data.type !== 'MS_AUTH_TOKEN') return;
-
-  // Always reset button immediately so it can never get stuck
-  const btn = document.getElementById('ms-auth-btn');
-  if (btn) { btn.disabled = false; btn.style.background = 'var(--ms-blue)'; }
-
-  const token = event.data.access_token;
-  if (token) {
-    accessToken = token;
-    fetchUserEmail();
-    try { sessionStorage.removeItem('mm_formstate'); localStorage.removeItem('mm_formstate'); } catch(e) {}
-  } else {
-    updateAuthUI(false);
-    if (btn) { btn.textContent = '⊞ Connect Outlook'; }
-    if (event.data.error) {
-      const errTxt = event.data.error_description || event.data.error || 'Unknown error';
+// Token expiry checker — Microsoft access tokens expire after ~1 hour.
+// Warns the user before expiry and auto-disconnects when expired.
+function checkTokenExpiry() {
+  if (!accessToken) return;
+  try {
+    const tokenTime = parseInt(sessionStorage.getItem('mm_token_time') || '0');
+    if (!tokenTime) return;
+    const elapsed = Date.now() - tokenTime;
+    const MS_50_MIN = 50 * 60 * 1000;
+    const MS_60_MIN = 60 * 60 * 1000;
+    const status = document.getElementById('auth-status');
+    if (elapsed >= MS_60_MIN) {
+      // Token expired — auto-disconnect
+      accessToken = null; userEmail = '';
+      try { sessionStorage.removeItem('mm_access_token'); sessionStorage.removeItem('mm_token_time'); } catch(e) {}
+      updateAuthUI(false);
       const w = document.getElementById('gen-warning');
-      if (w) { w.textContent = '⚠ Sign-in failed: ' + errTxt; }
+      if (w) w.textContent = '\u26A0 Outlook session expired \u2014 please reconnect.';
+    } else if (elapsed >= MS_50_MIN && status) {
+      // Warn: <10 min remaining
+      const minLeft = Math.ceil((MS_60_MIN - elapsed) / 60000);
+      status.textContent = '\u25CF ' + (userEmail || 'CONNECTED') + ' (' + minLeft + 'min left)';
     }
-  }
-});
+  } catch(e) {}
+}
 
 async function handleMsAuth() {
   if (accessToken) { signOut(); return; }
 
-  // Save form state before opening popup (popup may navigate this same URL)
-  try {
-    sessionStorage.setItem('mm_formstate', JSON.stringify({
-      subject: document.getElementById('email-subject').value,
-      body:    document.getElementById('email-body').value,
-      toggle:  document.getElementById('supplier-toggle').checked,
-      cc:      document.getElementById('email-cc')  ? document.getElementById('email-cc').value  : '',
-      bcc:     document.getElementById('email-bcc') ? document.getElementById('email-bcc').value : '',
-    }));
-  } catch(e) {}
+  // Save form state before redirecting — will be restored after auth round-trip
+  saveFormState();
 
   const { verifier, challenge } = await generatePkce();
 
@@ -1028,38 +1048,18 @@ async function handleMsAuth() {
     + '&response_mode=query'
     + '&code_challenge='        + challenge
     + '&code_challenge_method=S256'
-    + '&state='                 + encodeURIComponent(verifier);
+    + '&state='                 + encodeURIComponent(verifier)
+    + '&prompt=select_account';
 
-  const pw = 520, ph = 700;
-  const pl = Math.round(window.screenX + (window.outerWidth  - pw) / 2);
-  const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
-  const popup = window.open(authUrl, 'ms_auth_popup',
-    `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=yes`);
-
-  if (!popup || popup.closed) {
-    alert('Popup blocked.\n\n1. Click the blocked-popup icon in your address bar\n2. Allow popups from this site\n3. Click Connect Outlook again');
-    return;
-  }
-
-  const btn = document.getElementById('ms-auth-btn');
-  btn.textContent = '⏳ Waiting for login…'; btn.disabled = true; btn.style.background = '#555';
-
-  // Poll for popup closure — 600ms grace period for postMessage to arrive
-  const watchClose = setInterval(() => {
-    if (!popup || popup.closed) {
-      clearInterval(watchClose);
-      setTimeout(() => {
-        if (!accessToken) {
-          updateAuthUI(false);
-          const b = document.getElementById('ms-auth-btn');
-          if (b) { b.textContent = '⊞ Connect Outlook'; b.disabled = false; b.style.background = 'var(--ms-blue)'; }
-        }
-      }, 600);
-    }
-  }, 500);
+  // Full-page redirect instead of popup — avoids COOP/postMessage issues
+  window.location.href = authUrl;
 }
 
-function signOut() { accessToken = null; userEmail = ''; updateAuthUI(false); }
+function signOut() {
+  accessToken = null; userEmail = '';
+  try { sessionStorage.removeItem('mm_access_token'); sessionStorage.removeItem('mm_token_time'); } catch(e) {}
+  updateAuthUI(false);
+}
 
 function updateAuthUI(connected) {
   const status = document.getElementById('auth-status');
@@ -1214,8 +1214,37 @@ function saveSigFromModal() {
 // DRAG + DROP + PAGE LOAD
 // ═══════════════════════════════════════════════════════════════════════════════
 window.onload = function() {
+  var pe = document.getElementById('proof-email-display');
+  var ps = document.getElementById('proof-sent-display');
+  if (pe) pe.textContent = PROOF_EMAIL;
+  if (ps) ps.textContent = PROOF_EMAIL;
   loadFormState();
   loadSigsFromStorage();
+
+  // Restore access token from sessionStorage after OAuth redirect flow
+  try {
+    const storedToken = sessionStorage.getItem('mm_access_token');
+    if (storedToken) {
+      accessToken = storedToken;
+      // Keep token in sessionStorage so it survives within the tab session
+      // but store the timestamp for expiry tracking
+      if (!sessionStorage.getItem('mm_token_time')) {
+        sessionStorage.setItem('mm_token_time', String(Date.now()));
+      }
+      fetchUserEmail();
+    }
+    // Show auth error if one was stored from a failed redirect
+    const authErr = sessionStorage.getItem('mm_auth_error');
+    if (authErr) {
+      sessionStorage.removeItem('mm_auth_error');
+      const w = document.getElementById('gen-warning');
+      if (w) w.textContent = '\u26A0 Sign-in failed: ' + authErr;
+    }
+  } catch(e) {}
+
+  // Start token expiry checker (Microsoft tokens expire after ~1 hour)
+  setInterval(checkTokenExpiry, 60000);
+
   const zone = document.getElementById('upload-zone');
   zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
@@ -1466,6 +1495,8 @@ async function generateAndSendProof() {
     sent: false, failed: false
   }));
 
+  renderDraftPreview();
+
   document.getElementById('sn2').className = 'step-num done';
   document.getElementById('sn3').className = 'step-num active';
 
@@ -1563,8 +1594,10 @@ async function sendRaw(to, subject, htmlContent) {
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
       if (response.status === 401) {
-        accessToken = null; updateAuthUI(false);
-        logMsg('⚠ Outlook session expired — please click "Connect Outlook" to reconnect, then try again.', 'err');
+        accessToken = null; userEmail = '';
+        try { sessionStorage.removeItem('mm_access_token'); sessionStorage.removeItem('mm_token_time'); } catch(e2) {}
+        updateAuthUI(false);
+        logMsg('\u26A0 Outlook session expired \u2014 please click "Connect Outlook" to reconnect, then try again.', 'err');
         return false;
       }
       logMsg('❌ Failed: ' + to + ' — ' + ((err.error && err.error.message) || 'HTTP ' + response.status), 'err');
@@ -1641,7 +1674,8 @@ function resetAll() {
   document.getElementById('subject-preview').textContent = '';
   document.getElementById('gen-warning').textContent = '';
   try { sessionStorage.removeItem('mm_formstate'); localStorage.removeItem('mm_formstate'); } catch(e) {}
-  ['recipients-card','progress-section','stats-section'].forEach(id => { document.getElementById(id).style.display = 'none'; });
+  ['recipients-card','progress-section','stats-section','draft-preview-section'].forEach(id => { document.getElementById(id).style.display = 'none'; });
+  document.getElementById('draft-preview-tbody').innerHTML = '';
   document.getElementById('attachment-list').innerHTML  = '';
   document.getElementById('recipients-tbody').innerHTML = '';
   document.getElementById('progress-log').innerHTML     = '';

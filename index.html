@@ -602,6 +602,18 @@ tr:hover td { background: #f9f5ef; }
           <div id="subject-preview"></div>
         </div>
 
+        <!-- CC / BCC -->
+        <div class="form-group">
+          <span class="field-label">CC (optional)</span>
+          <input type="text" id="email-cc" placeholder="cc@example.com, another@example.com" oninput="saveFormState()">
+          <span style="font-size:10px;color:var(--muted);margin-top:2px;">Comma-separated. Added to every email.</span>
+        </div>
+        <div class="form-group">
+          <span class="field-label">BCC (optional)</span>
+          <input type="text" id="email-bcc" placeholder="bcc@example.com, another@example.com" oninput="saveFormState()">
+          <span style="font-size:10px;color:var(--muted);margin-top:2px;">Comma-separated. Added to every email.</span>
+        </div>
+
         <!-- Tokens + body -->
         <div>
           <span class="field-label">Insert Personalisation Token</span>
@@ -764,7 +776,7 @@ tr:hover td { background: #f9f5ef; }
 const PROOF_EMAIL  = 'hegertonsmith@cultwines.com';
 const MS_CLIENT_ID = 'dd4f1e8b-905c-4d47-8adb-29b071a2aee3';
 const MS_TENANT_ID = 'be753f7a-5a0a-4bc2-ac71-5aeba08f237f';
-const MS_REDIRECT  = 'https://hhkes.github.io/mailmerge';  // THIS file is the redirect
+const MS_REDIRECT  = 'https://hhkes.github.io/mailmerge';   // Must exactly match Azure AD registered redirect URI
 const MS_SCOPE     = 'Mail.Send User.Read';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -817,7 +829,7 @@ let editingSigId  = null;  // null = creating new
   document.querySelector('header').style.display = 'none';
   document.querySelector('.app').style.display    = 'none';
 
-  const MAIN_ORIGIN = 'https://hhkes.github.io/mailmerge';
+  const MAIN_ORIGIN = 'https://hhkes.github.io';
   const TOKEN_URL   = 'https://login.microsoftonline.com/' + MS_TENANT_ID + '/oauth2/v2.0/token';
 
   function authShowError(msg) {
@@ -896,6 +908,8 @@ function saveFormState() {
       subject: document.getElementById('email-subject').value,
       body:    document.getElementById('email-body').value,
       toggle:  document.getElementById('supplier-toggle').checked,
+      cc:      document.getElementById('email-cc')  ? document.getElementById('email-cc').value  : '',
+      bcc:     document.getElementById('email-bcc') ? document.getElementById('email-bcc').value : '',
       font:    fontEl   ? fontEl.value   : '',
       size:    sizeEl   ? sizeEl.value   : '',
       colour:  colourEl ? colourEl.value : '',
@@ -916,6 +930,8 @@ function loadFormState() {
     if (state.font   && document.getElementById('body-font'))   document.getElementById('body-font').value   = state.font;
     if (state.size   && document.getElementById('body-size'))   document.getElementById('body-size').value   = state.size;
     if (state.colour && document.getElementById('body-colour')) document.getElementById('body-colour').value = state.colour;
+    if (state.cc  && document.getElementById('email-cc'))  document.getElementById('email-cc').value  = state.cc;
+    if (state.bcc && document.getElementById('email-bcc')) document.getElementById('email-bcc').value = state.bcc;
     updateSubjectPreview();
   } catch(e) {}
 }
@@ -939,6 +955,13 @@ function loadFormState() {
 //   5. The message listener below receives the token, stores it, fetches email
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// CC/BCC helper — parse comma-separated email string into Graph API recipient array
+function parseEmailList(str) {
+  if (!str || !str.trim()) return [];
+  return str.split(',').map(e => e.trim()).filter(e => e.includes('@'))
+    .map(e => ({ emailAddress: { address: e } }));
+}
+
 // PKCE helpers — all operations stay in Uint8Array domain, never mix string/buffer
 function b64url(u8) {
   let s = '';
@@ -956,8 +979,8 @@ async function generatePkce() {
 
 // Message listener — receives token from popup after code exchange
 window.addEventListener('message', function(event) {
-  const allowedOrigin = 'https://hhkes.github.io/mailmerge';
-  if (!event.origin.startsWith(allowedOrigin)) return;
+  const allowedOrigin = 'https://hhkes.github.io';
+  if (event.origin !== allowedOrigin) return;
   if (!event.data || event.data.type !== 'MS_AUTH_TOKEN') return;
 
   // Always reset button immediately so it can never get stuck
@@ -989,6 +1012,8 @@ async function handleMsAuth() {
       subject: document.getElementById('email-subject').value,
       body:    document.getElementById('email-body').value,
       toggle:  document.getElementById('supplier-toggle').checked,
+      cc:      document.getElementById('email-cc')  ? document.getElementById('email-cc').value  : '',
+      bcc:     document.getElementById('email-bcc') ? document.getElementById('email-bcc').value : '',
     }));
   } catch(e) {}
 
@@ -1530,6 +1555,8 @@ async function sendRaw(to, subject, htmlContent) {
         subject,
         body: { contentType: 'HTML', content: htmlContent },
         toRecipients: [{ emailAddress: { address: to } }],
+        ccRecipients:  parseEmailList((document.getElementById('email-cc')  || {}).value || ''),
+        bccRecipients: parseEmailList((document.getElementById('email-bcc') || {}).value || ''),
         attachments: msgAttachments
       }, saveToSentItems: true })
     });
@@ -1609,6 +1636,8 @@ function resetAll() {
   document.getElementById('email-subject').value = '';
   document.getElementById('email-body').value    = '';
   document.getElementById('supplier-toggle').checked = false;
+  if (document.getElementById('email-cc'))  document.getElementById('email-cc').value  = '';
+  if (document.getElementById('email-bcc')) document.getElementById('email-bcc').value = '';
   document.getElementById('subject-preview').textContent = '';
   document.getElementById('gen-warning').textContent = '';
   try { sessionStorage.removeItem('mm_formstate'); localStorage.removeItem('mm_formstate'); } catch(e) {}

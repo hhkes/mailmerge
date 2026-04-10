@@ -1456,6 +1456,32 @@ function buildEmailHtml(bodyText, sigHtml) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// DRAFT PREVIEW
+// ═══════════════════════════════════════════════════════════════════════════════
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderDraftPreview() {
+  const section = document.getElementById('draft-preview-section');
+  if (!drafts.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+  document.getElementById('draft-count-badge').textContent = drafts.length + ' draft' + (drafts.length === 1 ? '' : 's');
+  const tbody = document.getElementById('draft-preview-tbody');
+  tbody.innerHTML = drafts.map(function(d, i) {
+    const snippet = d.body.length > 80 ? d.body.substring(0, 80) + '\u2026' : d.body;
+    return '<tr>'
+      + '<td>' + (i + 1) + '</td>'
+      + '<td>' + escHtml(d.supplier || '\u2014') + '</td>'
+      + '<td style="font-family:\'Courier New\',monospace;font-size:10px;">' + escHtml(d.to) + '</td>'
+      + '<td>' + escHtml(d.subject) + '</td>'
+      + '<td class="draft-body-snippet">' + escHtml(snippet) + '</td>'
+      + '</tr>';
+  }).join('');
+  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // GENERATE + PROOF FLOW
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 3 workflow:

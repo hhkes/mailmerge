@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MailMerge Pro — Outlook Sender</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* ─── Design Tokens ─── */
+:root {
+  --ink:    #1a1a2e;
+  --paper:  #f5f0e8;
+  --cream:  #ede8dc;
+  --accent: #c84b31;
+  --gold:   #d4a847;
+  --sage:   #5a7a6e;
+  --muted:  #7a7468;
+  --border: #ccc5b5;
+  --shadow: 0 4px 24px rgba(26,26,46,0.10);
+  --ms-blue:#0078d4;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+/* ─── Auth overlay (shown when page is loaded as the OAuth redirect) ─── */
+#auth-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: #1a1a2e; color: white;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 16px; z-index: 9999;
+}
+#auth-overlay.active { display: flex; }
+.auth-spinner {
+  width: 32px; height: 32px;
+  border: 3px solid rgba(255,255,255,0.2);
+  border-top-color: #c84b31; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#auth-overlay p { font-size: 15px; opacity: 0.8; margin: 0; }
+.auth-err { color: #f08080; font-size: 13px; max-width: 340px; text-align: center; line-height: 1.5; }
+
+/* ─── Header ─── */
+header {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  border-bottom: 3px solid var(--accent);
+  position: sticky;
+  top: 0;
+  z-index: 200;
+}
+.logo { font-family: Georgia, serif; font-size: 22px; letter-spacing: -0.5px; }
+.logo span { color: var(--gold); }
+.auth-section { display: flex; align-items: center; gap: 12px; }
+#auth-status {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.08);
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+#auth-status.connected { background: rgba(90,122,110,0.3); color: #8bc4a8; }
+.ms-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--ms-blue);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.ms-btn:hover { background: #006abc; }
+.ms-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ─── App layout ─── */
+.app {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: calc(100vh - 64px);
+}
+
+/* ─── Sidebar ─── */
+.sidebar {
+  background: var(--cream);
+  border-right: 1px solid var(--border);
+  padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  position: sticky;
+  top: 64px;
+  height: calc(100vh - 64px);
+  overflow-y: auto;
+}
+
+.panel-title {
+  font-family: Georgia, serif;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 7px;
+  margin-bottom: 6px;
+}
+
+/* Steps */
+.step { display: flex; gap: 12px; align-items: flex-start; }
+.step-num {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--ink); color: var(--paper);
+  font-family: 'Courier New', monospace; font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 2px;
+}
+.step-num.done   { background: var(--sage); }
+.step-num.active { background: var(--accent); }
+.step-label { font-size: 12px; color: var(--muted); }
+.step-label strong { display: block; color: var(--ink); font-size: 13px; margin-bottom: 1px; }
+
+/* Upload zone */
+.upload-zone {
+  border: 2px dashed var(--border); border-radius: 8px;
+  padding: 18px 12px; text-align: center;
+  cursor: pointer; transition: all 0.2s; background: white;
+}
+.upload-zone:hover, .upload-zone.dragover { border-color: var(--accent); background: #fff8f6; }
+.upload-zone .icon { font-size: 24px; margin-bottom: 5px; }
+.upload-zone p { font-size: 11px; color: var(--muted); }
+.upload-zone strong { display: block; font-size: 12px; color: var(--ink); margin-bottom: 2px; }
+#file-input { display: none; }
+
+/* Stats */
+.stats-bar { display: flex; gap: 8px; }
+.stat-chip {
+  flex: 1; background: white; border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 8px; text-align: center;
+}
+.stat-chip .num { font-family: Georgia, serif; font-size: 20px; color: var(--ink); display: block; }
+.stat-chip .lbl { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); font-family: 'Courier New', monospace; }
+.stat-chip.warn .num { color: var(--accent); }
+
+/* Attachments */
+.attachment-zone { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.attachment-list { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+.attachment-item {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--paper); border-radius: 5px; padding: 5px 8px;
+  font-size: 11px; font-family: 'Courier New', monospace;
+}
+.attachment-item button { background: none; border: none; cursor: pointer; color: var(--accent); font-size: 13px; padding: 0 3px; }
+#attach-input { display: none; }
+.attach-btn-label {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--sage); cursor: pointer;
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 5px 10px; background: var(--paper); margin-top: 5px;
+  transition: all 0.15s;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.attach-btn-label:hover { border-color: var(--sage); background: white; }
+
+/* Throttle */
+select {
+  width: 100%; background: var(--paper); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px; color: var(--ink); outline: none;
+}
+
+/* ─── Signature Manager (Sidebar) ─── */
+.sig-manager { display: flex; flex-direction: column; gap: 8px; }
+.sig-select-row { display: flex; gap: 6px; align-items: center; }
+.sig-select-row select { flex: 1; font-size: 12px; padding: 6px 8px; }
+.sig-preview-mini {
+  background: white; border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 12px;
+  font-size: 9pt; line-height: 1.4;
+  max-height: 120px; overflow-y: auto;
+  font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+}
+.sig-preview-mini.empty {
+  color: var(--muted); font-style: italic; font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Signature editor modal */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(26,26,46,0.55);
+  z-index: 500;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.2s;
+}
+.modal-overlay.open { opacity: 1; pointer-events: all; }
+.modal {
+  background: white; border-radius: 12px;
+  width: 680px; max-width: 95vw; max-height: 88vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  transform: translateY(12px); transition: transform 0.2s;
+}
+.modal-overlay.open .modal { transform: translateY(0); }
+.modal-header {
+  background: var(--ink); color: var(--paper);
+  padding: 14px 20px; border-radius: 12px 12px 0 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-header h3 { font-family: Georgia, serif; font-size: 15px; font-weight: 400; }
+.modal-close { background: none; border: none; color: rgba(255,255,255,0.6); font-size: 20px; cursor: pointer; line-height: 1; padding: 2px 6px; }
+.modal-close:hover { color: white; }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 14px; }
+.modal-footer { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ─── Main ─── */
+.main { padding: 28px 32px; display: flex; flex-direction: column; gap: 22px; }
+
+.section-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden; box-shadow: var(--shadow);
+}
+.card-header {
+  background: var(--ink); color: var(--paper);
+  padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
+}
+.card-header h3 { font-family: Georgia, serif; font-size: 15px; font-weight: 400; }
+.card-header .badge {
+  font-family: 'Courier New', monospace; font-size: 10px; letter-spacing: 1px;
+  padding: 3px 8px; border-radius: 20px; background: rgba(255,255,255,0.15);
+}
+.card-body { padding: 18px; }
+
+/* Form elements */
+.field-label {
+  display: block; font-size: 10px; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--muted);
+  font-family: 'Courier New', monospace; margin-bottom: 5px;
+}
+input[type="text"], textarea {
+  width: 100%; background: var(--paper); border: 1px solid var(--border);
+  border-radius: 7px; padding: 9px 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px; color: var(--ink); outline: none; transition: border-color 0.15s;
+}
+input[type="text"]:focus, textarea:focus { border-color: var(--accent); background: white; }
+textarea { resize: vertical; line-height: 1.6; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+
+/* Token bar */
+.token-bar { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 8px; }
+.token {
+  font-family: 'Courier New', monospace; font-size: 11px;
+  padding: 3px 9px; border-radius: 20px;
+  background: var(--cream); border: 1px solid var(--border);
+  cursor: pointer; transition: all 0.15s; color: var(--ink);
+}
+.token:hover { background: var(--gold); border-color: var(--gold); color: white; }
+
+/* Toggle */
+.toggle-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: var(--cream); border: 1px solid var(--border);
+  border-radius: 7px; padding: 9px 12px; margin-top: 6px;
+  cursor: pointer;
+}
+.toggle-row:hover { border-color: var(--sage); }
+.sw-outer { position: relative; width: 38px; height: 22px; flex-shrink: 0; margin-top: 1px; }
+.sw-outer input[type="checkbox"] {
+  position: absolute; opacity: 0; width: 100%; height: 100%;
+  margin: 0; padding: 0; cursor: pointer; z-index: 2;
+}
+.sw-track { position: absolute; inset: 0; background: #ccc; border-radius: 11px; transition: background 0.2s; }
+.sw-outer input[type="checkbox"]:checked + .sw-track { background: var(--sage); }
+.sw-knob {
+  position: absolute; width: 16px; height: 16px;
+  background: white; border-radius: 50%; top: 3px; left: 3px;
+  transition: transform 0.2s; pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2); z-index: 1;
+}
+.sw-outer input[type="checkbox"]:checked ~ .sw-knob { transform: translateX(16px); }
+.toggle-text { flex: 1; }
+.toggle-text strong { font-size: 13px; color: var(--ink); display: block; }
+.toggle-text span { font-size: 11px; color: var(--muted); }
+#subject-preview { font-size: 11px; color: var(--sage); font-style: italic; min-height: 16px; margin-top: 4px; }
+
+/* Buttons */
+.action-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 10px 20px; border-radius: 7px;
+  font-size: 13px; font-weight: 500; cursor: pointer; border: none;
+  transition: all 0.15s;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.btn-primary { background: var(--ink); color: var(--paper); }
+.btn-primary:hover:not(:disabled) { background: #2d2d4a; }
+.btn-danger  { background: var(--accent); color: white; }
+.btn-danger:hover:not(:disabled)  { background: #a83b24; }
+.btn-outline { background: transparent; border: 1.5px solid var(--border); color: var(--ink); }
+.btn-outline:hover:not(:disabled) { border-color: var(--ink); }
+.btn-sage    { background: var(--sage); color: white; }
+.btn-sage:hover:not(:disabled)    { background: #4a6a5e; }
+.btn-amber   { background: var(--gold); color: white; }
+.btn-amber:hover:not(:disabled)   { background: #b8902e; }
+.btn-sm { padding: 6px 14px; font-size: 12px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Recipients table */
+.recipients-table-wrap {
+  overflow-x: auto; max-height: 220px; overflow-y: auto;
+  border-radius: 7px; border: 1px solid var(--border);
+}
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+thead { position: sticky; top: 0; }
+th {
+  background: var(--ink); color: var(--paper);
+  padding: 7px 10px; text-align: left;
+  font-family: 'Courier New', monospace; font-weight: 400;
+  font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+}
+td { padding: 7px 10px; border-bottom: 1px solid var(--cream); vertical-align: middle; }
+tr:hover td { background: #f9f5ef; }
+.badge-ok   { color: var(--sage);   font-family: 'Courier New', monospace; font-size: 9px; }
+.badge-warn { color: var(--accent); font-family: 'Courier New', monospace; font-size: 9px; }
+.row-exclude { opacity: 0.4; }
+
+/* Info/warn boxes */
+.info-box {
+  background: #f0f7f4; border: 1px solid #b8d8cc;
+  border-radius: 7px; padding: 10px 14px; font-size: 12px;
+  color: var(--sage); display: flex; gap: 8px; align-items: flex-start;
+}
+.warn-box {
+  background: #fff4f2; border: 1px solid #f5c4b8;
+  border-radius: 7px; padding: 10px 14px; font-size: 12px;
+  color: var(--accent); display: flex; gap: 8px; align-items: flex-start;
+}
+
+/* Proof / Send section */
+.proof-flow { display: flex; flex-direction: column; gap: 14px; }
+.proof-step {
+  background: var(--cream); border: 1px solid var(--border);
+  border-radius: 9px; padding: 14px 16px;
+  display: flex; align-items: flex-start; gap: 14px;
+}
+.proof-step-num {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--ink); color: var(--paper);
+  font-family: 'Courier New', monospace; font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.proof-step-num.done   { background: var(--sage); }
+.proof-step-num.active { background: var(--accent); }
+.proof-step-body { flex: 1; }
+.proof-step-body strong { display: block; font-size: 13px; color: var(--ink); margin-bottom: 3px; }
+.proof-step-body p { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.proof-sent-box {
+  background: #f0f7f4; border: 1px solid #b8d8cc;
+  border-radius: 7px; padding: 10px 14px;
+  font-size: 12px; color: var(--sage);
+  display: none;
+}
+.proof-sent-box.visible { display: block; }
+
+/* Progress */
+.progress-bar-wrap { background: var(--cream); border-radius: 20px; height: 10px; overflow: hidden; margin-bottom: 6px; }
+.progress-bar-fill {
+  height: 100%; background: linear-gradient(90deg, var(--sage), var(--gold));
+  border-radius: 20px; transition: width 0.4s ease; width: 0%;
+}
+.progress-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.progress-status-label { font-size: 13px; font-weight: 500; }
+.progress-count-label  { font-family: 'Courier New', monospace; font-size: 12px; color: var(--muted); }
+.last-sent-banner {
+  background: var(--cream); border: 1px solid var(--border);
+  border-radius: 7px; padding: 9px 14px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; margin-bottom: 10px;
+}
+.last-sent-banner .ls-label { color: var(--muted); font-family: 'Courier New', monospace; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+.last-sent-banner .ls-val   { color: var(--ink); font-weight: 500; margin-top: 2px; }
+.last-sent-banner .ls-time  { color: var(--muted); font-size: 11px; font-family: 'Courier New', monospace; }
+.progress-log {
+  font-family: 'Courier New', monospace; font-size: 11px;
+  background: var(--ink); color: #8bc4a8;
+  border-radius: 7px; padding: 12px; margin-top: 10px;
+  max-height: 240px; overflow-y: auto; line-height: 1.9;
+}
+.log-ok   { color: #8bc4a8; }
+.log-err  { color: #f08080; }
+.log-warn { color: #d4a847; }
+.log-info { color: #a0b0c0; }
+.send-controls { display: flex; gap: 8px; margin-top: 10px; }
+.completion-banner {
+  background: linear-gradient(135deg, #f0f7f4, #e8f5f0);
+  border: 2px solid var(--sage); border-radius: 10px;
+  padding: 18px 22px; display: none; margin-top: 14px;
+}
+.completion-banner h4 { font-family: Georgia, serif; font-size: 17px; color: var(--sage); margin-bottom: 6px; }
+.completion-banner p  { font-size: 13px; color: var(--ink); }
+.completion-stats { display: flex; gap: 16px; margin-top: 12px; }
+.comp-chip { background: white; border: 1px solid var(--border); border-radius: 7px; padding: 8px 14px; text-align: center; }
+.comp-chip .cv { font-family: Georgia, serif; font-size: 22px; display: block; }
+.comp-chip .cl { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); font-family: 'Courier New', monospace; }
+.comp-chip.ok .cv   { color: var(--sage); }
+.comp-chip.err .cv  { color: var(--accent); }
+.comp-chip.skip .cv { color: var(--gold); }
+
+#gen-warning { font-size: 12px; color: var(--accent); }
+#progress-section { display: none; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     AUTH OVERLAY
+     Shown when the page is loaded as the OAuth redirect (i.e. URL contains
+     ?code=... from Microsoft). Runs the PKCE token exchange, posts the result
+     to window.opener, then closes itself.
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="auth-overlay">
+  <div class="auth-spinner" id="auth-spinner"></div>
+  <p id="auth-msg">Completing sign-in...</p>
+</div>
+
+<!-- ── HEADER ── -->
+<header>
+  <div class="logo">Mail<span>Merge</span> Pro</div>
+  <div class="auth-section">
+    <span id="auth-status">● NOT CONNECTED</span>
+    <button class="ms-btn" id="ms-auth-btn" onclick="handleMsAuth()">⊞ Connect Outlook</button>
+  </div>
+</header>
+
+<div class="app">
+
+  <!-- ── SIDEBAR ── -->
+  <div class="sidebar">
+
+    <!-- Workflow steps -->
+    <div>
+      <div class="panel-title">Workflow</div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+        <div class="step"><div class="step-num active" id="sn1">1</div><div class="step-label"><strong>Upload Recipients</strong>Import Excel file</div></div>
+        <div class="step"><div class="step-num" id="sn2">2</div><div class="step-label"><strong>Compose Email</strong>Write subject &amp; body</div></div>
+        <div class="step"><div class="step-num" id="sn3">3</div><div class="step-label"><strong>Send Proof</strong>Check before sending</div></div>
+        <div class="step"><div class="step-num" id="sn4">4</div><div class="step-label"><strong>Send All</strong>Auto-send to list</div></div>
+      </div>
+    </div>
+
+    <!-- Recipients -->
+    <div>
+      <div class="panel-title">Recipients</div>
+      <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+        <div class="icon">📊</div>
+        <strong>Drop Excel file here</strong>
+        <p>or click to browse</p>
+        <p style="margin-top:3px;font-size:10px;">Accepts .xlsx · .xls · .csv</p>
+      </div>
+      <input type="file" id="file-input" accept=".xlsx,.xls,.csv" onchange="handleFileUpload(event)">
+    </div>
+
+    <!-- Summary -->
+    <div id="stats-section" style="display:none">
+      <div class="panel-title">Summary</div>
+      <div class="stats-bar">
+        <div class="stat-chip"><span class="num" id="stat-total">0</span><span class="lbl">Total</span></div>
+        <div class="stat-chip"><span class="num" id="stat-valid">0</span><span class="lbl">Valid</span></div>
+        <div class="stat-chip warn"><span class="num" id="stat-warn">0</span><span class="lbl">Issues</span></div>
+      </div>
+    </div>
+
+    <!-- Attachments -->
+    <div>
+      <div class="panel-title">Attachments</div>
+      <div class="attachment-zone">
+        <p style="font-size:11px;color:var(--muted);">Added to every email · max 3MB per file</p>
+        <label class="attach-btn-label" for="attach-input">
+          <input type="file" id="attach-input" multiple
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,.rtf,.png,.jpg,.jpeg,.gif,.webp,.zip,.msg"
+            onchange="handleAttachments(event)">
+          📎 Add Attachment
+        </label>
+        <p style="font-size:10px;color:var(--muted);margin-top:5px;line-height:1.5;">PDF · Word · Excel · PowerPoint · Images · ZIP · Text</p>
+        <div class="attachment-list" id="attachment-list"></div>
+      </div>
+    </div>
+
+    <!-- Signature Manager -->
+    <div>
+      <div class="panel-title">Signature</div>
+      <div class="sig-manager">
+        <div class="sig-select-row">
+          <select id="sig-select" onchange="onSigSelectChange()">
+            <option value="">— Select a signature —</option>
+          </select>
+          <button class="btn btn-sm btn-outline" onclick="openSigModal(null)" title="Add new signature" style="padding:5px 10px;flex-shrink:0;">+</button>
+        </div>
+        <div id="sig-preview-mini" class="sig-preview-mini empty">No signature selected</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+          <button class="btn btn-sm btn-outline" id="btn-edit-sig" onclick="editCurrentSig()" style="font-size:11px;padding:4px 10px;" disabled>Edit</button>
+          <button class="btn btn-sm btn-outline" id="btn-delete-sig" onclick="deleteCurrentSig()" style="font-size:11px;padding:4px 10px;color:var(--accent);border-color:var(--accent);" disabled>Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Send Throttle -->
+    <div>
+      <div class="panel-title">Send Throttle</div>
+      <div style="background:white;border:1px solid var(--border);border-radius:7px;padding:10px 12px;">
+        <span class="field-label">Delay between emails</span>
+        <select id="send-delay" style="margin-top:3px;">
+          <option value="1000">1 second</option>
+          <option value="2000" selected>2 seconds</option>
+          <option value="3000">3 seconds</option>
+          <option value="5000">5 seconds</option>
+          <option value="0">No delay</option>
+        </select>
+        <p style="font-size:10px;color:var(--muted);margin-top:6px;">Throttling avoids spam filters</p>
+      </div>
+    </div>
+
+  </div><!-- end sidebar -->
+
+  <!-- ── MAIN ── -->
+  <div class="main">
+
+    <!-- Recipients Table -->
+    <div class="section-card" id="recipients-card" style="display:none;">
+      <div class="card-header">
+        <h3>Recipients</h3>
+        <span class="badge" id="recipient-count-badge">0 contacts</span>
+      </div>
+      <div class="card-body">
+        <div class="info-box" style="margin-bottom:12px;">
+          <span>ℹ️</span>
+          <span>Contacts without a name use a time-based greeting. Uncheck a row to exclude it.</span>
+        </div>
+        <div class="recipients-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>✓</th><th>Supplier</th><th>Name</th><th>Surname</th>
+                <th>Email</th><th>Greeting Preview</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="recipients-tbody"></tbody>
+          </table>
+        </div>
+        <div id="duplicate-warn" class="warn-box" style="margin-top:10px;display:none;">
+          ⚠️ <span id="duplicate-warn-text"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Compose -->
+    <div class="section-card">
+      <div class="card-header">
+        <h3>Compose Email</h3>
+        <span class="badge">STEP 2</span>
+      </div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:16px;">
+
+        <!-- Subject -->
+        <div class="form-group">
+          <span class="field-label">Subject Line</span>
+          <input type="text" id="email-subject" placeholder="e.g. DRC — Spring 2026 Allocation" oninput="updateSubjectPreview();saveFormState()">
+          <div class="toggle-row" onclick="document.getElementById('supplier-toggle').click()">
+            <div class="sw-outer">
+              <input type="checkbox" id="supplier-toggle" onchange="updateSubjectPreview();saveFormState()" onclick="event.stopPropagation()">
+              <span class="sw-track"></span>
+              <span class="sw-knob"></span>
+            </div>
+            <div class="toggle-text">
+              <strong>Append supplier name to subject</strong>
+              <span>e.g. "DRC - Seckford" · "DRC - Ditton" · "DRC - Corkr"</span>
+            </div>
+          </div>
+          <div id="subject-preview"></div>
+        </div>
+
+        <!-- Tokens + body -->
+        <div>
+          <span class="field-label">Insert Personalisation Token</span>
+          <div class="token-bar">
+            <div class="token" onclick="insertToken('{{salutation}}')">{{salutation}}</div>
+            <div class="token" onclick="insertToken('{{name}}')">{{name}}</div>
+            <div class="token" onclick="insertToken('{{surname}}')">{{surname}}</div>
+            <div class="token" onclick="insertToken('{{supplier}}')">{{supplier}}</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+            <span class="field-label" style="margin-bottom:0;">Email Body</span>
+            <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap;">
+              <label style="font-size:11px;color:var(--muted);font-family:'Courier New',monospace;letter-spacing:1px;text-transform:uppercase;">Font</label>
+              <select id="body-font" onchange="saveFormState()" style="width:auto;font-size:12px;padding:4px 8px;">
+                <option value="Calibri,'Segoe UI',Arial,sans-serif">Calibri</option>
+                <option value="Arial,Helvetica,sans-serif">Arial</option>
+                <option value="'Times New Roman',Times,serif">Times New Roman</option>
+                <option value="Georgia,serif">Georgia</option>
+                <option value="'Courier New',Courier,monospace">Courier New</option>
+              </select>
+              <label style="font-size:11px;color:var(--muted);font-family:'Courier New',monospace;letter-spacing:1px;text-transform:uppercase;">Size</label>
+              <select id="body-size" onchange="saveFormState()" style="width:auto;font-size:12px;padding:4px 8px;">
+                <option value="9pt">9pt</option>
+                <option value="10pt">10pt</option>
+                <option value="11pt" selected>11pt</option>
+                <option value="12pt">12pt</option>
+                <option value="14pt">14pt</option>
+              </select>
+              <label style="font-size:11px;color:var(--muted);font-family:'Courier New',monospace;letter-spacing:1px;text-transform:uppercase;">Colour</label>
+              <input type="color" id="body-colour" value="#000000" onchange="saveFormState()" style="width:32px;height:28px;padding:2px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:white;">
+            </div>
+          </div>
+          <textarea id="email-body" rows="12"
+            placeholder="Write your email here. Use tokens above to personalise.&#10;&#10;Example:&#10;{{salutation}} {{name}},&#10;&#10;I hope this finds you well..."
+            oninput="saveFormState()"></textarea>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Generate + Proof + Send -->
+    <div class="section-card">
+      <div class="card-header">
+        <h3>Generate &amp; Send</h3>
+        <span class="badge">STEPS 3 &amp; 4</span>
+      </div>
+      <div class="card-body">
+        <div class="proof-flow">
+
+          <!-- Step 3: Generate + send proof -->
+          <div class="proof-step" id="proof-step-box">
+            <div class="proof-step-num active" id="psn3">3</div>
+            <div class="proof-step-body">
+              <strong>Generate &amp; Send Proof</strong>
+              <p>Generates all emails, then sends a <strong>[PROOF]</strong> copy of the first recipient's personalised email to <strong>hegertonsmith@cultwines.com</strong> so you can review it before sending to anyone else.</p>
+              <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button class="btn btn-primary" id="btn-generate" onclick="generateAndSendProof()">⚡ Generate &amp; Send Proof</button>
+                <button class="btn btn-outline" onclick="resetAll()">↺ Reset</button>
+                <span id="gen-warning"></span>
+              </div>
+              <div class="proof-sent-box" id="proof-sent-box" style="margin-top:10px;">
+                ✓ Proof sent to hegertonsmith@cultwines.com — check your inbox, then click Send All below.
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 4: Send All (locked until proof sent) -->
+          <div class="proof-step" id="send-step-box" style="opacity:0.5;">
+            <div class="proof-step-num" id="psn4">4</div>
+            <div class="proof-step-body">
+              <strong>Send All Emails</strong>
+              <p id="send-step-desc">Locked until proof is approved. Send proof first (Step 3).</p>
+              <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button class="btn btn-danger" id="btn-send-all" onclick="sendAllEmails()" disabled>🚀 Send All</button>
+                <button class="btn btn-amber"  id="btn-pause"    onclick="togglePause()" style="display:none;">⏸ Pause</button>
+                <button class="btn btn-outline" id="btn-abort"   onclick="abortSend()"  style="display:none;">✕ Stop</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="section-card" id="progress-section">
+      <div class="card-header">
+        <h3>Sending Progress</h3>
+        <span class="badge" id="progress-badge">0%</span>
+      </div>
+      <div class="card-body">
+        <div class="progress-header-row">
+          <span class="progress-status-label" id="progress-label">Preparing…</span>
+          <span class="progress-count-label"  id="progress-count"></span>
+        </div>
+        <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progress-fill"></div></div>
+        <div class="last-sent-banner" id="last-sent-banner" style="display:none;">
+          <div>
+            <div class="ls-label">Last successfully sent</div>
+            <div class="ls-val" id="last-sent-email">—</div>
+          </div>
+          <div class="ls-time" id="last-sent-time">—</div>
+        </div>
+        <div class="progress-log" id="progress-log"></div>
+        <div class="completion-banner" id="completion-banner">
+          <h4>✅ Send Complete</h4>
+          <p id="completion-msg"></p>
+          <div class="completion-stats">
+            <div class="comp-chip ok">  <span class="cv" id="comp-sent">0</span>   <span class="cl">Sent</span></div>
+            <div class="comp-chip err"> <span class="cv" id="comp-failed">0</span> <span class="cl">Failed</span></div>
+            <div class="comp-chip skip"><span class="cv" id="comp-skipped">0</span><span class="cl">Skipped</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end main -->
+</div><!-- end app -->
+
+<!-- ── SIGNATURE EDITOR MODAL ── -->
+<div class="modal-overlay" id="sig-modal-overlay" onclick="closeSigModalIfOutside(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Add Signature</h3>
+      <button class="modal-close" onclick="closeSigModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <span class="field-label">Signature Name</span>
+        <input type="text" id="modal-sig-name" placeholder="e.g. Hermione — Cult Wines">
+      </div>
+      <div class="form-group">
+        <span class="field-label">Paste HTML Signature</span>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:6px;line-height:1.5;">
+          In Outlook: File → Options → Mail → Signatures → right-click your signature → "Edit" → select all → copy.<br>
+          Or use your browser's DevTools to copy the signature HTML from a sent email.
+        </p>
+        <textarea id="modal-sig-html" rows="12" style="font-family:'Courier New',monospace;font-size:11px;"
+          placeholder="&lt;div style=&quot;font-family:Calibri...&quot;&gt;&#10;  &lt;p&gt;Kind regards,&lt;/p&gt;&#10;  &lt;p&gt;&lt;strong&gt;Your Name&lt;/strong&gt;&lt;/p&gt;&#10;&lt;/div&gt;"
+          oninput="renderModalPreview()"></textarea>
+      </div>
+      <div class="form-group">
+        <span class="field-label">Preview</span>
+        <div id="modal-sig-preview" style="background:white;border:1px solid var(--border);border-radius:8px;padding:16px 20px;min-height:60px;font-family:Calibri,'Segoe UI',Arial,sans-serif;font-size:10pt;line-height:1.5;">
+          <span style="color:var(--muted);font-size:12px;font-style:italic;">Paste HTML above to see preview…</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeSigModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSigFromModal()">💾 Save Signature</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONFIGURATION — edit these constants to adapt the tool
+// ═══════════════════════════════════════════════════════════════════════════════
+const PROOF_EMAIL  = 'hegertonsmith@cultwines.com';
+const MS_CLIENT_ID = 'dd4f1e8b-905c-4d47-8adb-29b071a2aee3';
+const MS_TENANT_ID = 'be753f7a-5a0a-4bc2-ac71-5aeba08f237f';
+const MS_REDIRECT  = 'https://hhkes.github.io/mailmerge';  // THIS file is the redirect
+const MS_SCOPE     = 'Mail.Send User.Read';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════════
+let recipients    = [];
+let attachments   = [];
+let drafts        = [];
+let accessToken   = null;
+let userEmail     = '';
+let isPaused      = false;
+let abortFlag     = false;
+let sentCount     = 0;
+let failedCount   = 0;
+let lastSentEmail = '';
+let lastSentTime  = null;
+let proofSent     = false;
+
+// Signatures: [{ id:string, name:string, html:string }]
+let signatures    = [];
+let editingSigId  = null;  // null = creating new
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OAUTH REDIRECT HANDLER
+// ─────────────────────────────────────────────────────────────────────────────
+// When Microsoft redirects back to this page after login, the URL contains
+// ?code=...&state=...  The state param holds the PKCE verifier (passed through
+// the OAuth state parameter so the popup can read it without sessionStorage,
+// which is NOT shared between parent and popup windows).
+//
+// This runs immediately on page load BEFORE the rest of the UI initialises.
+// If this page is loaded as a redirect (code param present), it:
+//   1. Shows the auth overlay (full-screen dark spinner)
+//   2. Exchanges the code for an access token via the /token endpoint
+//   3. Posts { type:'MS_AUTH_TOKEN', access_token } to window.opener
+//   4. Closes the popup window
+// ═══════════════════════════════════════════════════════════════════════════════
+(async function handleOAuthRedirect() {
+  const params   = new URLSearchParams(window.location.search);
+  const code     = params.get('code');
+  const error    = params.get('error');
+  const verifier = params.get('state');  // PKCE verifier passed via state
+
+  // Not a redirect — normal page load, skip this handler entirely
+  if (!code && !error) return;
+
+  // Show auth overlay, hide normal app UI
+  const overlay = document.getElementById('auth-overlay');
+  overlay.classList.add('active');
+  document.querySelector('header').style.display = 'none';
+  document.querySelector('.app').style.display    = 'none';
+
+  const MAIN_ORIGIN = 'https://hhkes.github.io/mailmerge';
+  const TOKEN_URL   = 'https://login.microsoftonline.com/' + MS_TENANT_ID + '/oauth2/v2.0/token';
+
+  function authShowError(msg) {
+    document.getElementById('auth-spinner').style.display = 'none';
+    document.getElementById('auth-msg').textContent = 'Sign-in failed';
+    const e = document.createElement('p');
+    e.className = 'auth-err'; e.textContent = msg;
+    overlay.appendChild(e);
+  }
+
+  function postAndClose(data) {
+    if (window.opener && !window.opener.closed) {
+      try { window.opener.postMessage(Object.assign({ type: 'MS_AUTH_TOKEN' }, data), MAIN_ORIGIN); } catch(e) {}
+    }
+    setTimeout(function() { window.close(); }, 200);
+  }
+
+  if (error) {
+    const desc = params.get('error_description') || error;
+    authShowError(desc);
+    postAndClose({ error: error, error_description: desc });
+    return;
+  }
+
+  if (!verifier) {
+    authShowError('Missing verifier — please close this window and try again.');
+    postAndClose({ error: 'missing_verifier', error_description: 'No PKCE verifier in state param.' });
+    return;
+  }
+
+  document.getElementById('auth-msg').textContent = 'Exchanging code for token...';
+
+  try {
+    const body = new URLSearchParams({
+      client_id:     MS_CLIENT_ID,
+      grant_type:    'authorization_code',
+      code:          code,
+      redirect_uri:  MS_REDIRECT,
+      code_verifier: verifier
+    });
+
+    const resp = await fetch(TOKEN_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    body.toString()
+    });
+
+    const json = await resp.json();
+
+    if (json.access_token) {
+      document.getElementById('auth-msg').textContent = 'Signed in — closing...';
+      postAndClose({ access_token: json.access_token });
+    } else {
+      const errMsg = json.error_description || json.error || 'Token exchange failed';
+      authShowError(errMsg);
+      postAndClose({ error: json.error || 'token_exchange_failed', error_description: errMsg });
+    }
+  } catch(e) {
+    authShowError('Network error: ' + e.message);
+    postAndClose({ error: 'network_error', error_description: e.message });
+  }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FORM STATE PERSISTENCE
+// Subject, body, toggle, font, size, colour are saved to both sessionStorage
+// and localStorage on every change so they survive page reloads and auth
+// round-trips (the popup opens this same URL which resets JS state).
+// ═══════════════════════════════════════════════════════════════════════════════
+function saveFormState() {
+  try {
+    const fontEl   = document.getElementById('body-font');
+    const sizeEl   = document.getElementById('body-size');
+    const colourEl = document.getElementById('body-colour');
+    const state = JSON.stringify({
+      subject: document.getElementById('email-subject').value,
+      body:    document.getElementById('email-body').value,
+      toggle:  document.getElementById('supplier-toggle').checked,
+      font:    fontEl   ? fontEl.value   : '',
+      size:    sizeEl   ? sizeEl.value   : '',
+      colour:  colourEl ? colourEl.value : '',
+    });
+    sessionStorage.setItem('mm_formstate', state);
+    localStorage.setItem('mm_formstate', state);
+  } catch(e) {}
+}
+
+function loadFormState() {
+  try {
+    const raw = sessionStorage.getItem('mm_formstate') || localStorage.getItem('mm_formstate');
+    if (!raw) return;
+    const state = JSON.parse(raw);
+    if (state.subject) document.getElementById('email-subject').value = state.subject;
+    if (state.body)    document.getElementById('email-body').value    = state.body;
+    if (state.toggle)  document.getElementById('supplier-toggle').checked = true;
+    if (state.font   && document.getElementById('body-font'))   document.getElementById('body-font').value   = state.font;
+    if (state.size   && document.getElementById('body-size'))   document.getElementById('body-size').value   = state.size;
+    if (state.colour && document.getElementById('body-colour')) document.getElementById('body-colour').value = state.colour;
+    updateSubjectPreview();
+  } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MICROSOFT AUTH — PKCE flow
+// ─────────────────────────────────────────────────────────────────────────────
+// Uses Authorization Code + PKCE (RFC 7636). The implicit flow
+// (response_type=token) is deprecated by Microsoft for work accounts.
+//
+// Flow:
+//   1. handleMsAuth() generates verifier + challenge via generatePkce()
+//   2. Opens a popup to Microsoft's /authorize endpoint
+//      - verifier is passed in the OAuth `state` param (not sessionStorage —
+//        sessionStorage is NOT shared between windows)
+//   3. Microsoft authenticates the user, redirects popup back to this page
+//      with ?code=...&state=<verifier>
+//   4. The OAuth redirect handler above (handleOAuthRedirect) runs in the popup,
+//      POSTs to /token to exchange code+verifier for access_token, then
+//      window.opener.postMessage({ type:'MS_AUTH_TOKEN', access_token })
+//   5. The message listener below receives the token, stores it, fetches email
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// PKCE helpers — all operations stay in Uint8Array domain, never mix string/buffer
+function b64url(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+async function generatePkce() {
+  // Step 1: 32 random bytes -> base64url string (the verifier)
+  const verifier  = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  // Step 2: UTF-8 encode verifier, SHA-256 hash, base64url encode (the challenge)
+  const hashBuf   = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = b64url(new Uint8Array(hashBuf));
+  return { verifier, challenge };
+}
+
+// Message listener — receives token from popup after code exchange
+window.addEventListener('message', function(event) {
+  const allowedOrigin = 'https://hhkes.github.io/mailmerge';
+  if (!event.origin.startsWith(allowedOrigin)) return;
+  if (!event.data || event.data.type !== 'MS_AUTH_TOKEN') return;
+
+  // Always reset button immediately so it can never get stuck
+  const btn = document.getElementById('ms-auth-btn');
+  if (btn) { btn.disabled = false; btn.style.background = 'var(--ms-blue)'; }
+
+  const token = event.data.access_token;
+  if (token) {
+    accessToken = token;
+    fetchUserEmail();
+    try { sessionStorage.removeItem('mm_formstate'); localStorage.removeItem('mm_formstate'); } catch(e) {}
+  } else {
+    updateAuthUI(false);
+    if (btn) { btn.textContent = '⊞ Connect Outlook'; }
+    if (event.data.error) {
+      const errTxt = event.data.error_description || event.data.error || 'Unknown error';
+      const w = document.getElementById('gen-warning');
+      if (w) { w.textContent = '⚠ Sign-in failed: ' + errTxt; }
+    }
+  }
+});
+
+async function handleMsAuth() {
+  if (accessToken) { signOut(); return; }
+
+  // Save form state before opening popup (popup may navigate this same URL)
+  try {
+    sessionStorage.setItem('mm_formstate', JSON.stringify({
+      subject: document.getElementById('email-subject').value,
+      body:    document.getElementById('email-body').value,
+      toggle:  document.getElementById('supplier-toggle').checked,
+    }));
+  } catch(e) {}
+
+  const { verifier, challenge } = await generatePkce();
+
+  const authUrl =
+    'https://login.microsoftonline.com/' + MS_TENANT_ID + '/oauth2/v2.0/authorize?'
+    + 'client_id='              + MS_CLIENT_ID
+    + '&response_type=code'
+    + '&redirect_uri='          + encodeURIComponent(MS_REDIRECT)
+    + '&scope='                 + encodeURIComponent(MS_SCOPE)
+    + '&response_mode=query'
+    + '&code_challenge='        + challenge
+    + '&code_challenge_method=S256'
+    + '&state='                 + encodeURIComponent(verifier);
+
+  const pw = 520, ph = 700;
+  const pl = Math.round(window.screenX + (window.outerWidth  - pw) / 2);
+  const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+  const popup = window.open(authUrl, 'ms_auth_popup',
+    `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes,status=no,toolbar=no,menubar=no,location=yes`);
+
+  if (!popup || popup.closed) {
+    alert('Popup blocked.\n\n1. Click the blocked-popup icon in your address bar\n2. Allow popups from this site\n3. Click Connect Outlook again');
+    return;
+  }
+
+  const btn = document.getElementById('ms-auth-btn');
+  btn.textContent = '⏳ Waiting for login…'; btn.disabled = true; btn.style.background = '#555';
+
+  // Poll for popup closure — 600ms grace period for postMessage to arrive
+  const watchClose = setInterval(() => {
+    if (!popup || popup.closed) {
+      clearInterval(watchClose);
+      setTimeout(() => {
+        if (!accessToken) {
+          updateAuthUI(false);
+          const b = document.getElementById('ms-auth-btn');
+          if (b) { b.textContent = '⊞ Connect Outlook'; b.disabled = false; b.style.background = 'var(--ms-blue)'; }
+        }
+      }, 600);
+    }
+  }, 500);
+}
+
+function signOut() { accessToken = null; userEmail = ''; updateAuthUI(false); }
+
+function updateAuthUI(connected) {
+  const status = document.getElementById('auth-status');
+  const btn    = document.getElementById('ms-auth-btn');
+  btn.disabled = false;
+  if (connected) {
+    status.textContent = '● ' + (userEmail || 'CONNECTED');
+    status.className   = 'connected';
+    btn.textContent    = '⊞ Disconnect';
+    btn.style.background = '#555';
+  } else {
+    status.textContent = '● NOT CONNECTED';
+    status.className   = '';
+    btn.innerHTML      = '⊞ Connect Outlook';
+    btn.style.background = 'var(--ms-blue)';
+  }
+}
+
+async function fetchUserEmail() {
+  if (!accessToken) return;
+  try {
+    const r = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: 'Bearer ' + accessToken } });
+    const d = await r.json();
+    userEmail = d.mail || d.userPrincipalName || '';
+    updateAuthUI(true);
+  } catch(e) { updateAuthUI(true); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SIGNATURE MANAGER
+// Signatures stored in localStorage as mm_signatures: [{ id, name, html }]
+// IDs are stringified Date.now() values. All comparisons use String() to avoid
+// type coercion bugs between numeric and string IDs.
+// ═══════════════════════════════════════════════════════════════════════════════
+function saveSigsToStorage() {
+  try { localStorage.setItem('mm_signatures', JSON.stringify(signatures)); } catch(e) {}
+}
+
+function loadSigsFromStorage() {
+  try {
+    const raw = localStorage.getItem('mm_signatures');
+    if (raw) signatures = JSON.parse(raw);
+  } catch(e) {}
+  renderSigDropdown();
+}
+
+function renderSigDropdown() {
+  const sel = document.getElementById('sig-select');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— Select a signature —</option>';
+  signatures.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id; opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+  if (current && signatures.find(s => s.id == current)) sel.value = current;
+  onSigSelectChange();
+}
+
+function onSigSelectChange() {
+  const sel  = document.getElementById('sig-select');
+  const id   = String(sel.value);
+  const sig  = signatures.find(s => String(s.id) === id);
+  const prev = document.getElementById('sig-preview-mini');
+  const btnEdit = document.getElementById('btn-edit-sig');
+  const btnDel  = document.getElementById('btn-delete-sig');
+  if (sig) {
+    prev.className = 'sig-preview-mini';
+    prev.innerHTML = sanitiseSigHtml(sig.html);
+    btnEdit.disabled = false; btnDel.disabled = false;
+  } else {
+    prev.className = 'sig-preview-mini empty';
+    prev.textContent = 'No signature selected';
+    btnEdit.disabled = true; btnDel.disabled = true;
+  }
+}
+
+function getSelectedSigHtml() {
+  const id  = String(document.getElementById('sig-select').value);
+  const sig = signatures.find(s => String(s.id) === id);
+  return sig ? sig.html : '';
+}
+
+function openSigModal(sigId) {
+  editingSigId = sigId;
+  const modal  = document.getElementById('sig-modal-overlay');
+  const titleEl = document.getElementById('modal-title');
+  const nameEl  = document.getElementById('modal-sig-name');
+  const htmlEl  = document.getElementById('modal-sig-html');
+  const prevEl  = document.getElementById('modal-sig-preview');
+  if (sigId !== null) {
+    const sig = signatures.find(s => String(s.id) === String(sigId));
+    titleEl.textContent = 'Edit Signature';
+    nameEl.value = sig ? sig.name : '';
+    htmlEl.value = sig ? sig.html : '';
+    prevEl.innerHTML = sig ? sanitiseSigHtml(sig.html) : '';
+  } else {
+    titleEl.textContent = 'Add Signature';
+    nameEl.value = ''; htmlEl.value = '';
+    prevEl.innerHTML = '<span style="color:var(--muted);font-size:12px;font-style:italic;">Paste HTML above to see preview…</span>';
+  }
+  modal.classList.add('open');
+  setTimeout(() => nameEl.focus(), 100);
+}
+
+function editCurrentSig() { const id = document.getElementById('sig-select').value; if (id) openSigModal(id); }
+
+function deleteCurrentSig() {
+  const id = document.getElementById('sig-select').value;
+  if (!id) return;
+  const sig = signatures.find(s => String(s.id) === String(id));
+  if (!sig) return;
+  if (!confirm('Delete signature "' + sig.name + '"?')) return;
+  signatures = signatures.filter(s => String(s.id) !== String(id));
+  saveSigsToStorage(); renderSigDropdown();
+}
+
+function closeSigModal() { document.getElementById('sig-modal-overlay').classList.remove('open'); }
+function closeSigModalIfOutside(e) { if (e.target === document.getElementById('sig-modal-overlay')) closeSigModal(); }
+
+function renderModalPreview() {
+  const html = document.getElementById('modal-sig-html').value.trim();
+  const prev = document.getElementById('modal-sig-preview');
+  prev.innerHTML = html ? sanitiseSigHtml(html) : '<span style="color:var(--muted);font-size:12px;font-style:italic;">Paste HTML above to see preview…</span>';
+}
+
+function sanitiseSigHtml(html) {
+  // Strip <script> tags before rendering raw HTML in the page
+  return html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<script[^>]*>/gi, '');
+}
+
+function saveSigFromModal() {
+  const name = document.getElementById('modal-sig-name').value.trim();
+  const html = document.getElementById('modal-sig-html').value.trim();
+  if (!name) { alert('Please enter a signature name.'); document.getElementById('modal-sig-name').focus(); return; }
+  if (!html)  { alert('Please paste signature HTML.');  document.getElementById('modal-sig-html').focus();  return; }
+  if (editingSigId !== null) {
+    const sig = signatures.find(s => String(s.id) === String(editingSigId));
+    if (sig) { sig.name = name; sig.html = html; }
+  } else {
+    signatures.push({ id: String(Date.now()), name, html });
+  }
+  saveSigsToStorage();
+  renderSigDropdown();
+  const newId = editingSigId !== null ? String(editingSigId) : signatures[signatures.length - 1].id;
+  document.getElementById('sig-select').value = newId;
+  onSigSelectChange();
+  closeSigModal();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DRAG + DROP + PAGE LOAD
+// ═══════════════════════════════════════════════════════════════════════════════
+window.onload = function() {
+  loadFormState();
+  loadSigsFromStorage();
+  const zone = document.getElementById('upload-zone');
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault(); zone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  });
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FILE UPLOAD — Excel / CSV parsing via SheetJS (XLSX)
+// ─────────────────────────────────────────────────────────────────────────────
+// parseRecipients uses a two-pass fuzzy column matcher:
+//   Pass 1: exact lowercase match against search terms
+//   Pass 2: substring match (search term appears inside header)
+// This handles headers like NAME, Email Address, First Name, etc.
+// Key fix: 'name' must be first in the name terms list — it's the simplest
+// match and avoids false positives on 'firstname','given' etc.
+// ═══════════════════════════════════════════════════════════════════════════════
+function handleFileUpload(e) { const file = e.target.files[0]; if (file) processFile(file); }
+
+function processFile(file) {
+  if (typeof XLSX === 'undefined') { alert('XLSX library not loaded. Please refresh the page.'); return; }
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      const wb  = XLSX.read(ev.target.result, { type: 'array' });
+      const ws  = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (!raw.length) { alert('The spreadsheet appears to be empty.'); return; }
+      parseRecipients(raw);
+    } catch(err) { alert('Could not read file: ' + err.message); }
+  };
+  reader.onerror = () => alert('File could not be read. Please try again.');
+  reader.readAsArrayBuffer(file);
+}
+
+function parseRecipients(raw) {
+  const get = (row, terms) => {
+    // Pass 1: exact match — does any header exactly equal a search term?
+    for (const t of terms) { const k = Object.keys(row).find(k => k.toLowerCase().trim() === t); if (k && String(row[k]).trim()) return String(row[k]).trim(); }
+    // Pass 2: includes match — does a search term appear as substring in header?
+    for (const t of terms) { const k = Object.keys(row).find(k => k.toLowerCase().includes(t)); if (k && String(row[k]).trim()) return String(row[k]).trim(); }
+    return '';
+  };
+  recipients = raw.map((row, i) => ({
+    idx:        i,
+    supplier:   get(row, ['supplier','company','organisation','organization','account']),
+    name:       get(row, ['name','firstname','first name','forename','given','first']),
+    surname:    get(row, ['surname','lastname','last name','family','last']),
+    email:      get(row, ['email','e-mail','mail']),
+    salutation: get(row, ['salutation']),
+    included:   true
+  })).filter(r => r.email && r.email.includes('@'));
+
+  if (!recipients.length) { alert('No rows with valid email addresses found.\n\nMake sure your spreadsheet has an "Email" column.'); return; }
+  detectDuplicates(); renderTable(); updateStats();
+  document.getElementById('recipients-card').style.display = '';
+  document.getElementById('upload-zone').style.borderColor = '';
+  document.getElementById('sn1').className = 'step-num done';
+  document.getElementById('sn2').className = 'step-num active';
+}
+
+function detectDuplicates() {
+  const seen = {}, dupes = [];
+  recipients.forEach(r => { if (seen[r.email]) dupes.push(r.email); seen[r.email] = true; });
+  const box = document.getElementById('duplicate-warn');
+  if (dupes.length) {
+    box.style.display = 'flex';
+    document.getElementById('duplicate-warn-text').textContent =
+      'Duplicate email(s) detected: ' + [...new Set(dupes)].join(', ') + ' — only the first occurrence will be sent.';
+    const firstSeen = new Set();
+    recipients.forEach(r => { if (firstSeen.has(r.email)) r.included = false; firstSeen.add(r.email); });
+  } else { box.style.display = 'none'; }
+}
+
+function getSalutation(r) {
+  if (r.salutation) return r.salutation;
+  return new Date().getHours() < 12 ? 'Good morning' : 'Good afternoon';
+}
+
+function renderTable() {
+  const tbody = document.getElementById('recipients-tbody');
+  tbody.innerHTML = recipients.map((r, i) => {
+    const sal = getSalutation(r), preview = sal + (r.name ? ', ' + r.name : '');
+    return `<tr class="${r.included ? '' : 'row-exclude'}">
+      <td><input type="checkbox" ${r.included ? 'checked' : ''} onchange="toggleRecipient(${i},this.checked)"></td>
+      <td>${r.supplier || '—'}</td>
+      <td>${r.name    || '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${r.surname || '<span style="color:var(--muted)">—</span>'}</td>
+      <td style="font-family:'Courier New',monospace;font-size:10px;">${r.email}</td>
+      <td style="font-style:italic;color:var(--sage);font-size:11px;">${preview},</td>
+      <td>${r.email.includes('@') ? '<span class="badge-ok">✓ OK</span>' : '<span class="badge-warn">✗ No email</span>'}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('recipient-count-badge').textContent = recipients.length + ' contacts';
+}
+
+function toggleRecipient(i, checked) { recipients[i].included = checked; updateStats(); }
+
+function updateStats() {
+  document.getElementById('stat-total').textContent = recipients.length;
+  document.getElementById('stat-valid').textContent = recipients.filter(r => r.included && r.email.includes('@')).length;
+  document.getElementById('stat-warn').textContent  = recipients.filter(r => !r.email.includes('@')).length;
+  document.getElementById('stats-section').style.display = '';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ATTACHMENTS
+// Files stored as raw File objects in the attachments[] array.
+// Base64-encoded on send. Max 3MB per file. Deduped by filename.
+// ═══════════════════════════════════════════════════════════════════════════════
+const MIME_MAP = {
+  'pdf':'application/pdf','doc':'application/msword',
+  'docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'xls':'application/vnd.ms-excel',
+  'xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'ppt':'application/vnd.ms-powerpoint',
+  'pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'csv':'text/csv','txt':'text/plain','rtf':'application/rtf',
+  'png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg','gif':'image/gif','webp':'image/webp',
+  'zip':'application/zip','msg':'application/vnd.ms-outlook'
+};
+const FILE_ICONS = {
+  'pdf':'📄','doc':'📝','docx':'📝','xls':'📊','xlsx':'📊','csv':'📊',
+  'ppt':'📋','pptx':'📋','png':'🖼','jpg':'🖼','jpeg':'🖼','gif':'🖼','webp':'🖼',
+  'zip':'🗜','txt':'📃','rtf':'📃','msg':'✉'
+};
+const MAX_ATTACH_BYTES = 3 * 1024 * 1024;
+function getExt(fn) { return (fn.split('.').pop() || '').toLowerCase(); }
+function getMime(file) { if (file.type && file.type !== 'application/octet-stream') return file.type; return MIME_MAP[getExt(file.name)] || 'application/octet-stream'; }
+function getIcon(fn) { return FILE_ICONS[getExt(fn)] || '📎'; }
+
+function handleAttachments(e) {
+  const oversized = [];
+  Array.from(e.target.files).forEach(file => {
+    if (file.size > MAX_ATTACH_BYTES) { oversized.push(file.name + ' (' + (file.size/1024/1024).toFixed(1) + 'MB)'); return; }
+    if (!attachments.find(a => a.name === file.name)) attachments.push(file);
+  });
+  if (oversized.length) alert('Files exceed 3MB limit:\n\n' + oversized.join('\n') + '\n\nPlease compress or use a file-sharing link.');
+  e.target.value = '';
+  renderAttachments();
+}
+
+function renderAttachments() {
+  document.getElementById('attachment-list').innerHTML = attachments.map((f, i) => {
+    const kb = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size/1024).toFixed(1) + ' KB' : (f.size/1048576).toFixed(1) + ' MB';
+    return `<div class="attachment-item">
+      <span>${getIcon(f.name)} <strong style="color:var(--ink)">${f.name}</strong>
+        <span style="color:var(--muted);margin-left:4px;">${getExt(f.name).toUpperCase()} · ${kb}</span>
+      </span>
+      <button onclick="removeAttachment(${i})" title="Remove">✕</button>
+    </div>`;
+  }).join('') || '';
+}
+
+function removeAttachment(i) { attachments.splice(i, 1); renderAttachments(); }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMPOSE HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+function insertToken(token) {
+  const ta = document.getElementById('email-body');
+  const s  = ta.selectionStart;
+  ta.value = ta.value.slice(0, s) + token + ta.value.slice(ta.selectionEnd);
+  ta.setSelectionRange(s + token.length, s + token.length);
+  ta.focus();
+}
+
+function updateSubjectPreview() {
+  const sub = (document.getElementById('email-subject').value || '').trim();
+  const tog = document.getElementById('supplier-toggle').checked;
+  const pr  = document.getElementById('subject-preview');
+  if (sub && tog) pr.textContent = 'e.g.  "' + sub + ' - Seckford"  ·  "' + sub + ' - Ditton"  ·  "' + sub + ' - Corkr"';
+  else if (sub)   pr.textContent = 'Preview: "' + sub + '"';
+  else            pr.textContent = '';
+}
+
+function buildSubject(r) {
+  const base = (document.getElementById('email-subject').value || '').trim();
+  const tog  = document.getElementById('supplier-toggle').checked;
+  if (tog && r.supplier) return base + ' - ' + r.supplier;
+  return base;
+}
+
+function renderBody(r, rawBody) {
+  // Replaces {{tokens}} with per-recipient values
+  return rawBody
+    .replace(/\{\{salutation\}\}/g, getSalutation(r))
+    .replace(/\{\{name\}\}/g,       r.name     || '')
+    .replace(/\{\{surname\}\}/g,    r.surname  || '')
+    .replace(/\{\{supplier\}\}/g,   r.supplier || '');
+}
+
+function buildEmailHtml(bodyText, sigHtml) {
+  // Escapes the plain-text body, wraps it with font/size/colour from controls,
+  // and appends the signature HTML below with spacing but no dividing line.
+  const escaped = bodyText
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\n/g,'<br>');
+  const font   = (document.getElementById('body-font')   || {}).value || "Calibri,'Segoe UI',Arial,sans-serif";
+  const size   = (document.getElementById('body-size')   || {}).value || '11pt';
+  const colour = (document.getElementById('body-colour') || {}).value || '#000000';
+  return '<div style="font-family:' + font + ';font-size:' + size + ';color:' + colour + ';">'
+    + escaped
+    + (sigHtml ? '<br><br><div style="margin-top:14px;">' + sigHtml + '</div>' : '')
+    + '</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GENERATE + PROOF FLOW
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 3 workflow:
+//   1. Validate all inputs
+//   2. Build drafts[] — one per included recipient with personalised body/subject
+//   3. Send a [PROOF] copy of drafts[0] to PROOF_EMAIL
+//   4. If proof succeeds, unlock Send All (Step 4)
+// ═══════════════════════════════════════════════════════════════════════════════
+async function generateAndSendProof() {
+  const subject = (document.getElementById('email-subject').value || '').trim();
+  const body    = (document.getElementById('email-body').value    || '').trim();
+  const warn    = document.getElementById('gen-warning');
+  warn.textContent = '';
+
+  if (!subject) { warn.textContent = '⚠ Please enter a subject line first.'; document.getElementById('email-subject').focus(); return; }
+  if (!body)    { warn.textContent = '⚠ Please write an email body first.';  document.getElementById('email-body').focus();    return; }
+  if (!recipients.length) {
+    warn.textContent = '⚠ No recipients loaded — upload your Excel file first.';
+    const uz = document.getElementById('upload-zone');
+    uz.style.borderColor = 'var(--accent)';
+    uz.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => { uz.style.borderColor = ''; }, 3000);
+    return;
+  }
+  if (!accessToken) { warn.textContent = '⚠ Please connect Outlook first (top right).'; return; }
+
+  const active = recipients.filter(r => r.included && r.email.includes('@'));
+  if (!active.length) { warn.textContent = '⚠ No valid recipients selected.'; return; }
+
+  const sigHtml = getSelectedSigHtml();
+
+  drafts = active.map(r => ({
+    to: r.email, supplier: r.supplier,
+    subject:  buildSubject(r),
+    body:     renderBody(r, body),
+    sigHtml,
+    sent: false, failed: false
+  }));
+
+  document.getElementById('sn2').className = 'step-num done';
+  document.getElementById('sn3').className = 'step-num active';
+
+  const firstDraft   = drafts[0];
+  const proofSubject = '[PROOF] ' + firstDraft.subject;
+  const proofHtml    = buildEmailHtml(firstDraft.body, firstDraft.sigHtml);
+
+  showProgress();
+  logMsg('📧 Sending proof to ' + PROOF_EMAIL + '…', 'info');
+
+  const btn = document.getElementById('btn-generate');
+  btn.textContent = '⏳ Sending proof…'; btn.disabled = true;
+
+  const ok = await sendRaw(PROOF_EMAIL, proofSubject, proofHtml);
+
+  btn.textContent = '⚡ Generate & Send Proof'; btn.disabled = false;
+
+  if (ok) {
+    logMsg('✓ Proof sent to ' + PROOF_EMAIL, 'ok');
+    proofSent = true;
+    document.getElementById('proof-sent-box').classList.add('visible');
+    document.getElementById('psn3').className = 'proof-step-num done';
+    document.getElementById('psn4').className = 'proof-step-num active';
+    document.getElementById('send-step-box').style.opacity = '1';
+    document.getElementById('btn-send-all').disabled = false;
+    document.getElementById('sn3').className = 'step-num done';
+    document.getElementById('sn4').className = 'step-num active';
+    document.getElementById('send-step-desc').textContent =
+      'Proof approved — ready to send to ' + active.length + ' recipient(s).';
+  } else {
+    logMsg('❌ Proof send failed — check connection and try again.', 'err');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SEND ALL
+// ─────────────────────────────────────────────────────────────────────────────
+// Iterates drafts[], builds HTML for each, calls sendRaw().
+// Respects isPaused (spin-waits) and abortFlag (breaks loop).
+// Throttle delay applied between sends (not after last).
+// ═══════════════════════════════════════════════════════════════════════════════
+async function sendAllEmails() {
+  if (!proofSent) return;
+  if (!confirm('Send to ' + drafts.filter(d => !d.sent).length + ' recipient(s)?\n\nThis cannot be undone.')) return;
+
+  abortFlag = false; isPaused = false; sentCount = 0; failedCount = 0;
+  showProgress();
+  document.getElementById('btn-pause').style.display = '';
+  document.getElementById('btn-abort').style.display = '';
+  document.getElementById('btn-send-all').disabled = true;
+
+  const toSend = drafts.filter(d => !d.sent);
+  for (let i = 0; i < toSend.length; i++) {
+    if (abortFlag) { logMsg('⛔ Aborted. Last sent: ' + (lastSentEmail || 'none'), 'warn'); break; }
+    while (isPaused) await sleep(400);
+    updateProgress(i, toSend.length, toSend[i].to);
+    const html = buildEmailHtml(toSend[i].body, toSend[i].sigHtml);
+    const ok   = await sendRaw(toSend[i].to, toSend[i].subject, html);
+    if (ok) { toSend[i].sent = true; sentCount++; lastSentEmail = toSend[i].to; lastSentTime = new Date(); updateLastSentBanner(); }
+    else    { toSend[i].failed = true; failedCount++; }
+    const delay = parseInt(document.getElementById('send-delay').value);
+    if (delay > 0 && i < toSend.length - 1) await sleep(delay);
+  }
+
+  document.getElementById('btn-pause').style.display = 'none';
+  document.getElementById('btn-abort').style.display = 'none';
+  document.getElementById('sn4').className = 'step-num done';
+  finaliseSend(toSend.length);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CORE SEND — Microsoft Graph API
+// POST /v1.0/me/sendMail with HTML body and base64 attachments.
+// 401 response clears token and prompts reconnect.
+// ═══════════════════════════════════════════════════════════════════════════════
+async function sendRaw(to, subject, htmlContent) {
+  if (!accessToken) { logMsg('⚠ Not connected to Outlook.', 'err'); return false; }
+  try {
+    const msgAttachments = await Promise.all(attachments.map(async file => {
+      const b64 = await fileToBase64(file);
+      return { '@odata.type': '#microsoft.graph.fileAttachment', name: file.name, contentBytes: b64, contentType: getMime(file) };
+    }));
+    const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: {
+        subject,
+        body: { contentType: 'HTML', content: htmlContent },
+        toRecipients: [{ emailAddress: { address: to } }],
+        attachments: msgAttachments
+      }, saveToSentItems: true })
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        accessToken = null; updateAuthUI(false);
+        logMsg('⚠ Outlook session expired — please click "Connect Outlook" to reconnect, then try again.', 'err');
+        return false;
+      }
+      logMsg('❌ Failed: ' + to + ' — ' + ((err.error && err.error.message) || 'HTTP ' + response.status), 'err');
+      return false;
+    }
+    logMsg('✉ Sent: ' + to, 'ok');
+    return true;
+  } catch(e) { logMsg('❌ Error: ' + e.message, 'err'); return false; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROGRESS UI
+// ═══════════════════════════════════════════════════════════════════════════════
+function showProgress() {
+  const sec = document.getElementById('progress-section');
+  sec.style.display = '';
+  sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function updateProgress(done, total, current) {
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  document.getElementById('progress-fill').style.width  = pct + '%';
+  document.getElementById('progress-badge').textContent = pct + '%';
+  document.getElementById('progress-label').textContent = done < total ? 'Sending to: ' + current : 'Complete!';
+  document.getElementById('progress-count').textContent = done + ' / ' + total;
+}
+function updateLastSentBanner() {
+  document.getElementById('last-sent-banner').style.display = 'flex';
+  document.getElementById('last-sent-email').textContent = lastSentEmail;
+  document.getElementById('last-sent-time').textContent  = lastSentTime ? lastSentTime.toLocaleTimeString() : '—';
+}
+function logMsg(msg, type) {
+  const log  = document.getElementById('progress-log');
+  const span = document.createElement('span');
+  span.className = 'log-' + (type || 'info'); span.textContent = msg;
+  log.appendChild(span); log.appendChild(document.createTextNode('\n'));
+  log.scrollTop = log.scrollHeight;
+}
+function togglePause() {
+  isPaused = !isPaused;
+  document.getElementById('btn-pause').textContent = isPaused ? '▶ Resume' : '⏸ Pause';
+  logMsg(isPaused ? '⏸ Paused.' : '▶ Resuming…', 'warn');
+}
+function abortSend() {
+  if (!confirm('Stop sending? Emails already sent cannot be unsent.')) return;
+  abortFlag = true; logMsg('⛔ Abort requested…', 'warn');
+}
+function finaliseSend(total) {
+  updateProgress(total, total, 'Complete');
+  logMsg('─────────────────────────────────', 'info');
+  logMsg('✅ Complete. Sent: ' + sentCount + ' | Failed: ' + failedCount, 'ok');
+  const banner = document.getElementById('completion-banner');
+  banner.style.display = '';
+  document.getElementById('comp-sent').textContent    = sentCount;
+  document.getElementById('comp-failed').textContent  = failedCount;
+  document.getElementById('comp-skipped').textContent = 0;
+  document.getElementById('completion-msg').textContent =
+    'Finished ' + total + ' email(s). ' + (failedCount > 0 ? failedCount + ' failed — see log.' : 'All delivered successfully.');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RESET
+// ═══════════════════════════════════════════════════════════════════════════════
+function resetAll() {
+  if (!confirm('Reset all recipients, subject and body?')) return;
+  recipients = []; attachments = []; drafts = []; proofSent = false;
+  sentCount = failedCount = 0; lastSentEmail = ''; lastSentTime = null;
+  isPaused = false; abortFlag = false;
+  document.getElementById('file-input').value    = '';
+  document.getElementById('email-subject').value = '';
+  document.getElementById('email-body').value    = '';
+  document.getElementById('supplier-toggle').checked = false;
+  document.getElementById('subject-preview').textContent = '';
+  document.getElementById('gen-warning').textContent = '';
+  try { sessionStorage.removeItem('mm_formstate'); localStorage.removeItem('mm_formstate'); } catch(e) {}
+  ['recipients-card','progress-section','stats-section'].forEach(id => { document.getElementById(id).style.display = 'none'; });
+  document.getElementById('attachment-list').innerHTML  = '';
+  document.getElementById('recipients-tbody').innerHTML = '';
+  document.getElementById('progress-log').innerHTML     = '';
+  document.getElementById('completion-banner').style.display = 'none';
+  document.getElementById('last-sent-banner').style.display  = 'none';
+  document.getElementById('proof-sent-box').classList.remove('visible');
+  document.getElementById('btn-send-all').disabled = true;
+  document.getElementById('btn-pause').style.display = 'none';
+  document.getElementById('btn-abort').style.display = 'none';
+  document.getElementById('send-step-box').style.opacity = '0.5';
+  document.getElementById('psn3').className = 'proof-step-num active';
+  document.getElementById('psn4').className = 'proof-step-num';
+  document.getElementById('send-step-desc').textContent = 'Locked until proof is approved. Send proof first (Step 3).';
+  ['sn1','sn2','sn3','sn4'].forEach((id, i) => {
+    document.getElementById(id).className = 'step-num' + (i === 0 ? ' active' : '');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+</script>
+</body>
+</html>

@@ -808,6 +808,7 @@ let attachments   = [];
 let drafts        = [];
 let accessToken   = null;
 let userEmail     = '';
+let userName      = '';
 let isPaused      = false;
 let abortFlag     = false;
 let sentCount     = 0;
@@ -1084,6 +1085,7 @@ async function fetchUserEmail() {
     const r = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: 'Bearer ' + accessToken } });
     const d = await r.json();
     userEmail = d.mail || d.userPrincipalName || '';
+    userName  = d.givenName || d.displayName || '';
     updateAuthUI(true);
   } catch(e) { updateAuthUI(true); }
 }
@@ -1526,9 +1528,18 @@ async function generateAndSendProof() {
   document.getElementById('sn2').className = 'step-num done';
   document.getElementById('sn3').className = 'step-num active';
 
-  const firstDraft   = drafts[0];
-  const proofSubject = '[PROOF] ' + firstDraft.subject;
-  const proofHtml    = buildEmailHtml(firstDraft.body, firstDraft.sigHtml);
+  // Build proof with TEST data (not a real recipient's details)
+  const proofRecipient = {
+    supplier:   'TEST SUPPLIER',
+    name:       userName || 'Test',
+    surname:    '',
+    salutation: '',
+    email:      PROOF_EMAIL,
+    included:   true
+  };
+  const proofSubject = '[PROOF] ' + buildSubject(proofRecipient);
+  const proofBody    = renderBody(proofRecipient, body);
+  const proofHtml    = buildEmailHtml(proofBody, sigHtml);
 
   showProgress();
   logMsg('📧 Sending proof to ' + PROOF_EMAIL + '…', 'info');

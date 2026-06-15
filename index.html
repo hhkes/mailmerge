@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <title>MailMerge Pro — Outlook Sender</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -472,7 +473,7 @@ tr:hover td { background: #f9f5ef; }
 
 <!-- ── HEADER ── -->
 <header>
-  <div class="logo">Mail<span>Merge</span> Pro</div>
+  <div class="logo">Mail<span>Merge</span> Pro <span id="build-version" title="Page version — tell support this if formatting looks wrong" style="font-family:'Courier New',monospace;font-size:10px;color:var(--muted);letter-spacing:0;margin-left:8px;"></span></div>
   <div class="auth-section">
     <span id="auth-status">● NOT CONNECTED</span>
     <button class="ms-btn" id="ms-auth-btn" onclick="handleMsAuth()">⊞ Connect Outlook</button>
@@ -815,6 +816,8 @@ tr:hover td { background: #f9f5ef; }
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONFIGURATION — edit these constants to adapt the tool
 // ═══════════════════════════════════════════════════════════════════════════════
+// Bump on every deploy so the visible stamp confirms the page is up to date.
+const BUILD_VERSION = '2026.06.15-7';
 const PROOF_EMAIL  = 'hegertonsmith' + '@' + 'cultwines.com';
 const MS_CLIENT_ID = 'dd4f1e8b-905c-4d47-8adb-29b071a2aee3';
 const MS_TENANT_ID = 'be753f7a-5a0a-4bc2-ac71-5aeba08f237f';
@@ -1251,6 +1254,8 @@ function saveSigFromModal() {
 // DRAG + DROP + PAGE LOAD
 // ═══════════════════════════════════════════════════════════════════════════════
 window.onload = function() {
+  var bv = document.getElementById('build-version');
+  if (bv) bv.textContent = 'v' + BUILD_VERSION;
   var pe = document.getElementById('proof-email-display');
   var ps = document.getElementById('proof-sent-display');
   if (pe) pe.textContent = PROOF_EMAIL;
@@ -1665,10 +1670,20 @@ function bodyHtmlToEmail(html) {
           // Force clean grey gridlines so the table always shows borders in the
           // email, regardless of what Excel supplied (partial / windowtext / none).
           // Background fills, bold and alignment on the cells are left untouched.
-          child.style.borderCollapse = 'collapse';
+          child.setAttribute('cellspacing', '0');   // help Outlook desktop (Word engine)
+          child.setAttribute('cellpadding', '0');
+          let tableStyle = (child.getAttribute('style') || '');
+          if (!/border-collapse/i.test(tableStyle)) tableStyle = (tableStyle.replace(/;?\s*$/, ';') + 'border-collapse:collapse;').replace(/^;+/, '');
+          child.setAttribute('style', tableStyle);
           child.querySelectorAll('td,th').forEach(function(cell) {
-            cell.style.border = '1px solid #cccccc';
-            if (!cell.style.padding) cell.style.padding = '4px 8px';
+            let st = (cell.getAttribute('style') || '');
+            const hasPadding = /(^|;)\s*padding\s*:/i.test(st);
+            // Drop any existing border declarations, then add one clean grey border.
+            st = st.replace(/(^|;)\s*border[a-z-]*\s*:[^;]*/gi, '$1').replace(/;{2,}/g, ';').replace(/^;+/, '').trim();
+            if (st && !/;\s*$/.test(st)) st += ';';
+            st += 'border:1px solid #cccccc;';
+            if (!hasPadding) st += 'padding:4px 8px;';
+            cell.setAttribute('style', st);
           });
           s += '\n' + child.outerHTML.replace(/[\r\n]+/g, ' ') + '\n';
         } else if (tag === 'BR') {

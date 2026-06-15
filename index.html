@@ -817,7 +817,7 @@ tr:hover td { background: #f9f5ef; }
 // CONFIGURATION — edit these constants to adapt the tool
 // ═══════════════════════════════════════════════════════════════════════════════
 // Bump on every deploy so the visible stamp confirms the page is up to date.
-const BUILD_VERSION = '2026.06.15-7';
+const BUILD_VERSION = '2026.06.15-8';
 const PROOF_EMAIL  = 'hegertonsmith' + '@' + 'cultwines.com';
 const MS_CLIENT_ID = 'dd4f1e8b-905c-4d47-8adb-29b071a2aee3';
 const MS_TENANT_ID = 'be753f7a-5a0a-4bc2-ac71-5aeba08f237f';
@@ -1679,9 +1679,10 @@ function bodyHtmlToEmail(html) {
             let st = (cell.getAttribute('style') || '');
             const hasPadding = /(^|;)\s*padding\s*:/i.test(st);
             // Drop any existing border declarations, then add one clean grey border.
-            st = st.replace(/(^|;)\s*border[a-z-]*\s*:[^;]*/gi, '$1').replace(/;{2,}/g, ';').replace(/^;+/, '').trim();
+            st = st.replace(/(^|;)\s*(mso-border-alt|border[a-z-]*)\s*:[^;]*/gi, '$1').replace(/;{2,}/g, ';').replace(/^;+/, '').trim();
             if (st && !/;\s*$/.test(st)) st += ';';
-            st += 'border:1px solid #cccccc;';
+            // border = modern clients; mso-border-alt = Outlook desktop (Word engine).
+            st += 'border:1px solid #cccccc;mso-border-alt:solid #cccccc 1.0pt;';
             if (!hasPadding) st += 'padding:4px 8px;';
             cell.setAttribute('style', st);
           });

@@ -435,6 +435,26 @@ tr:hover td { background: #f9f5ef; }
 .draft-table-wrap { overflow-x: auto; max-height: 320px; overflow-y: auto; border-radius: 7px; border: 1px solid var(--border); }
 .draft-table-wrap table td { font-size: 11px; padding: 7px 10px; border-bottom: 1px solid var(--cream); vertical-align: top; }
 .draft-body-snippet { color: var(--muted); font-style: italic; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ─── Rich text email body (contenteditable) ─── */
+.rich-editor {
+  width: 100%; min-height: 230px; max-height: 620px; overflow-y: auto;
+  background: var(--paper); border: 1px solid var(--border); border-radius: 7px;
+  padding: 10px 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px; color: var(--ink); outline: none; line-height: 1.6;
+  transition: border-color 0.15s;
+}
+.rich-editor:focus { border-color: var(--accent); background: white; }
+.rich-editor:empty:before {
+  content: attr(data-placeholder);
+  color: var(--muted); font-style: italic; white-space: pre-wrap;
+}
+.rich-editor table { border-collapse: collapse; margin: 6px 0; max-width: 100%; }
+.rich-editor td, .rich-editor th { border: 1px solid #ccc; padding: 4px 8px; }
+.rich-editor img { max-width: 100%; height: auto; }
+.body-hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+.body-hint strong { color: var(--sage); }
 </style>
 </head>
 <body>
@@ -650,9 +670,10 @@ tr:hover td { background: #f9f5ef; }
               <input type="color" id="body-colour" value="#000000" onchange="saveFormState()" style="width:32px;height:28px;padding:2px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:white;">
             </div>
           </div>
-          <textarea id="email-body" rows="12"
-            placeholder="Write your email here. Use tokens above to personalise.&#10;&#10;Example:&#10;{{salutation}} {{name}},&#10;&#10;I hope this finds you well..."
-            oninput="saveFormState()"></textarea>
+          <div id="email-body" class="rich-editor" contenteditable="true"
+            data-placeholder="Write your email here. Use tokens above to personalise.&#10;&#10;Example:&#10;{{salutation}} {{name}},&#10;&#10;I hope this finds you well…"
+            oninput="saveFormState()" onpaste="handleBodyPaste(event)"></div>
+          <p class="body-hint">📋 <strong>Tip:</strong> copy a range of cells in Excel and paste it straight into the body above — the table keeps its borders, fills and layout.</p>
         </div>
 
       </div>
@@ -702,6 +723,31 @@ tr:hover td { background: #f9f5ef; }
       </div>
     </div>
 
+    <!-- Create Drafts (manual-send alternative to Send All) -->
+    <div class="section-card" id="create-drafts-card">
+      <div class="card-header">
+        <h3>Create Drafts</h3>
+        <span class="badge">MANUAL SEND</span>
+      </div>
+      <div class="card-body">
+        <div class="proof-step" style="background:#fbf6e8;border-color:#e6d9a8;">
+          <div class="proof-step-num" style="background:var(--gold);">✎</div>
+          <div class="proof-step-body">
+            <strong>Generate all emails as Outlook drafts</strong>
+            <p>Creates a personalised draft for every selected recipient in your Outlook <strong>Drafts</strong> folder. Nothing is sent — open each one in Outlook to review, edit and send manually. No proof required.</p>
+            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button class="btn btn-amber"   id="btn-create-drafts" onclick="createAllDrafts()">📝 Create Drafts</button>
+              <button class="btn btn-outline"  id="btn-stop-drafts"   onclick="abortDrafts()" style="display:none;">✕ Stop</button>
+              <span id="drafts-warning" style="font-size:12px;color:var(--accent);"></span>
+            </div>
+            <div class="proof-sent-box" id="drafts-done-box" style="margin-top:10px;">
+              ✓ Drafts created — open Outlook → <strong>Drafts</strong> to review, edit and send each one manually.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Draft Preview -->
     <div class="section-card" id="draft-preview-section">
       <div class="card-header">
@@ -740,12 +786,12 @@ tr:hover td { background: #f9f5ef; }
         </div>
         <div class="progress-log" id="progress-log"></div>
         <div class="completion-banner" id="completion-banner">
-          <h4>✅ Send Complete</h4>
+          <h4 id="completion-title">✅ Send Complete</h4>
           <p id="completion-msg"></p>
           <div class="completion-stats">
-            <div class="comp-chip ok">  <span class="cv" id="comp-sent">0</span>   <span class="cl">Sent</span></div>
-            <div class="comp-chip err"> <span class="cv" id="comp-failed">0</span> <span class="cl">Failed</span></div>
-            <div class="comp-chip skip"><span class="cv" id="comp-skipped">0</span><span class="cl">Skipped</span></div>
+            <div class="comp-chip ok">  <span class="cv" id="comp-sent">0</span>   <span class="cl" id="comp-l-sent">Sent</span></div>
+            <div class="comp-chip err"> <span class="cv" id="comp-failed">0</span> <span class="cl" id="comp-l-failed">Failed</span></div>
+            <div class="comp-chip skip"><span class="cv" id="comp-skipped">0</span><span class="cl" id="comp-l-skipped">Skipped</span></div>
           </div>
         </div>
       </div>
@@ -935,7 +981,7 @@ function saveFormState() {
     const colourEl = document.getElementById('body-colour');
     const state = JSON.stringify({
       subject: document.getElementById('email-subject').value,
-      body:    document.getElementById('email-body').value,
+      body:    document.getElementById('email-body').innerHTML,
       toggle:  document.getElementById('supplier-toggle').checked,
       cc:      document.getElementById('email-cc')  ? document.getElementById('email-cc').value  : '',
       bcc:     document.getElementById('email-bcc') ? document.getElementById('email-bcc').value : '',
@@ -954,7 +1000,11 @@ function loadFormState() {
     if (!raw) return;
     const state = JSON.parse(raw);
     if (state.subject) document.getElementById('email-subject').value = state.subject;
-    if (state.body)    document.getElementById('email-body').value    = state.body;
+    if (state.body) {
+      // Migrate any legacy plain-text body to HTML; otherwise restore HTML as-is.
+      const editor = document.getElementById('email-body');
+      editor.innerHTML = /<[a-z][\s\S]*>/i.test(state.body) ? state.body : textToHtml(state.body);
+    }
     if (state.toggle)  document.getElementById('supplier-toggle').checked = true;
     if (state.font   && document.getElementById('body-font'))   document.getElementById('body-font').value   = state.font;
     if (state.size   && document.getElementById('body-size'))   document.getElementById('body-size').value   = state.size;
@@ -1410,11 +1460,151 @@ function removeAttachment(i) { attachments.splice(i, 1); renderAttachments(); }
 // COMPOSE HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 function insertToken(token) {
-  const ta = document.getElementById('email-body');
-  const s  = ta.selectionStart;
-  ta.value = ta.value.slice(0, s) + token + ta.value.slice(ta.selectionEnd);
-  ta.setSelectionRange(s + token.length, s + token.length);
-  ta.focus();
+  // Insert the token text at the caret inside the contenteditable body.
+  insertHtmlAtCaret(escHtml(token));
+}
+
+// Insert an HTML fragment at the current caret position inside #email-body.
+// Falls back to appending at the end if the caret is not inside the editor.
+function insertHtmlAtCaret(html) {
+  const editor = document.getElementById('email-body');
+  editor.focus();
+  const sel = window.getSelection();
+  let range;
+  if (sel && sel.rangeCount && editor.contains(sel.anchorNode)) {
+    range = sel.getRangeAt(0);
+    range.deleteContents();
+  } else {
+    range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+  }
+  const temp = document.createElement('div');
+  temp.innerHTML = html;
+  const frag = document.createDocumentFragment();
+  let node, last = null;
+  while ((node = temp.firstChild)) { last = frag.appendChild(node); }
+  range.insertNode(frag);
+  if (last && sel) {
+    range.setStartAfter(last); range.setEndAfter(last);
+    sel.removeAllRanges(); sel.addRange(range);
+  }
+  saveFormState();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PASTE HANDLING — keep Excel table formatting, sanitise everything else
+// ─────────────────────────────────────────────────────────────────────────────
+// When pasting from Excel/Word the clipboard carries a `text/html` payload that
+// includes the full table markup (plus a lot of Office-specific junk). We parse
+// that HTML, rebuild a clean, whitelisted subset with INLINE styles so the table
+// (borders, fills, bold headers, alignment) survives in the final sent email,
+// then insert it at the caret. Plain-text pastes keep their line breaks.
+function handleBodyPaste(e) {
+  const cd = e.clipboardData || window.clipboardData;
+  if (!cd) return; // let the browser handle it
+  const html = cd.getData('text/html');
+  const text = cd.getData('text/plain');
+  if (html && html.trim()) {
+    e.preventDefault();
+    insertHtmlAtCaret(sanitizePastedHtml(html));
+  } else if (text) {
+    e.preventDefault();
+    insertHtmlAtCaret(textToHtml(text));
+  }
+}
+
+// Tags we keep when sanitising pasted HTML. Everything else is unwrapped
+// (its children are kept) so no text is lost.
+const PASTE_ALLOWED_TAGS = {
+  TABLE:1, THEAD:1, TBODY:1, TFOOT:1, TR:1, TD:1, TH:1, CAPTION:1, COLGROUP:1, COL:1,
+  P:1, DIV:1, BR:1, SPAN:1, B:1, STRONG:1, I:1, EM:1, U:1, A:1,
+  UL:1, OL:1, LI:1, H1:1, H2:1, H3:1, H4:1, H5:1, H6:1
+};
+// CSS properties preserved on table parts (keeps Excel fills, alignment, bold…).
+const PASTE_CELL_STYLE_PROPS = [
+  'background', 'background-color', 'color', 'text-align', 'vertical-align',
+  'font-weight', 'font-style', 'text-decoration', 'padding', 'width', 'height',
+  'border', 'border-top', 'border-bottom', 'border-left', 'border-right'
+];
+// CSS properties preserved on inline/text elements.
+const PASTE_INLINE_STYLE_PROPS = [
+  'color', 'background-color', 'font-weight', 'font-style', 'text-decoration', 'text-align'
+];
+
+function cleanStyleDecls(styleStr, allowed) {
+  if (!styleStr) return '';
+  return styleStr.split(';').map(function(decl) {
+    const idx = decl.indexOf(':');
+    if (idx < 0) return null;
+    const prop = decl.slice(0, idx).trim().toLowerCase();
+    const val  = decl.slice(idx + 1).trim();
+    if (allowed.indexOf(prop) < 0) return null;
+    if (!val) return null;
+    // Reject anything that could smuggle in resources or script.
+    if (/url\(|expression|javascript:|[<>]/i.test(val)) return null;
+    return prop + ':' + val;
+  }).filter(Boolean).join(';');
+}
+
+function sanitizePastedHtml(html) {
+  let doc;
+  try { doc = new DOMParser().parseFromString(html, 'text/html'); }
+  catch (e) { return textToHtml(html.replace(/<[^>]*>/g, '')); }
+  const out = document.createElement('div');
+  sanitizeChildrenInto(doc.body, out);
+  return out.innerHTML;
+}
+
+function sanitizeChildrenInto(src, dest) {
+  src.childNodes.forEach(function(child) {
+    if (child.nodeType === 3) {            // text node
+      dest.appendChild(document.createTextNode(child.nodeValue));
+      return;
+    }
+    if (child.nodeType !== 1) return;      // skip comments etc.
+    const tag = child.tagName.toUpperCase();
+    if (tag === 'SCRIPT' || tag === 'STYLE') return;
+
+    if (!PASTE_ALLOWED_TAGS[tag]) {        // disallowed — unwrap, keep contents
+      sanitizeChildrenInto(child, dest);
+      return;
+    }
+
+    const el = document.createElement(tag.toLowerCase());
+
+    if (tag === 'A') {
+      const href = child.getAttribute('href') || '';
+      if (/^(https?:|mailto:)/i.test(href)) el.setAttribute('href', href);
+    }
+    if (tag === 'TD' || tag === 'TH') {
+      ['colspan', 'rowspan'].forEach(function(attr) {
+        const v = parseInt(child.getAttribute(attr), 10);
+        if (v > 1) el.setAttribute(attr, String(v));
+      });
+    }
+
+    // Inline styles (whitelisted), with sensible defaults for table parts.
+    const isCell  = (tag === 'TD' || tag === 'TH');
+    const isTable = (tag === 'TABLE');
+    let style = cleanStyleDecls(
+      child.getAttribute('style'),
+      (isCell || isTable || tag === 'TR') ? PASTE_CELL_STYLE_PROPS : PASTE_INLINE_STYLE_PROPS
+    );
+    if (isCell) {
+      if (!/(^|;)\s*border/i.test(style)) style += (style ? ';' : '') + 'border:1px solid #cccccc';
+      if (!/padding/i.test(style))        style += ';padding:4px 8px';
+    }
+    if (isTable) {
+      if (!/border-collapse/i.test(style)) style += (style ? ';' : '') + 'border-collapse:collapse';
+    }
+    if (tag === 'TH' && !/font-weight/i.test(style)) style += (style ? ';' : '') + 'font-weight:bold';
+    style = style.replace(/^;+/, '');
+    if (style) el.setAttribute('style', style);
+
+    dest.appendChild(el);
+    sanitizeChildrenInto(child, el);
+  });
 }
 
 function updateSubjectPreview() {
@@ -1434,25 +1624,24 @@ function buildSubject(r) {
 }
 
 function renderBody(r, rawBody) {
-  // Replaces {{tokens}} with per-recipient values
+  // Replaces {{tokens}} with per-recipient values. The body is HTML, so token
+  // values are HTML-escaped to avoid breaking markup or injecting tags.
   return rawBody
-    .replace(/\{\{salutation\}\}/g, getSalutation(r))
-    .replace(/\{\{name\}\}/g,       r.name     || '')
-    .replace(/\{\{surname\}\}/g,    r.surname  || '')
-    .replace(/\{\{supplier\}\}/g,   r.supplier || '');
+    .replace(/\{\{salutation\}\}/g, escHtml(getSalutation(r)))
+    .replace(/\{\{name\}\}/g,       escHtml(r.name     || ''))
+    .replace(/\{\{surname\}\}/g,    escHtml(r.surname  || ''))
+    .replace(/\{\{supplier\}\}/g,   escHtml(r.supplier || ''));
 }
 
-function buildEmailHtml(bodyText, sigHtml) {
-  // Escapes the plain-text body, wraps it with font/size/colour from controls,
+function buildEmailHtml(bodyHtml, sigHtml) {
+  // Wraps the (already-HTML) body with the chosen font/size/colour as defaults,
   // and appends the signature HTML below with spacing but no dividing line.
-  const escaped = bodyText
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/\n/g,'<br>');
+  // Pasted tables carry their own inline styles and override these defaults.
   const font   = (document.getElementById('body-font')   || {}).value || "Calibri,'Segoe UI',Arial,sans-serif";
   const size   = (document.getElementById('body-size')   || {}).value || '11pt';
   const colour = (document.getElementById('body-colour') || {}).value || '#000000';
   return '<div style="font-family:' + font + ';font-size:' + size + ';color:' + colour + ';">'
-    + escaped
+    + bodyHtml
     + (sigHtml ? '<br><br><div style="margin-top:14px;">' + sigHtml + '</div>' : '')
     + '</div>';
 }
@@ -1464,6 +1653,21 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Flatten an HTML string to a single line of plain text (for preview snippets).
+// Cell/block boundaries become spaces so e.g. table cells don't run together.
+function htmlToText(html) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = (html || '')
+    .replace(/<\/(td|th|tr|p|div|li|h[1-6]|caption)>/gi, '$& ')
+    .replace(/<br\s*\/?>/gi, ' ');
+  return (tmp.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+// Escape plain text and turn newlines into <br> for the contenteditable body.
+function textToHtml(t) {
+  return escHtml(t).replace(/\r\n|\r|\n/g, '<br>');
+}
+
 function renderDraftPreview() {
   const section = document.getElementById('draft-preview-section');
   if (!drafts.length) { section.style.display = 'none'; return; }
@@ -1471,7 +1675,8 @@ function renderDraftPreview() {
   document.getElementById('draft-count-badge').textContent = drafts.length + ' draft' + (drafts.length === 1 ? '' : 's');
   const tbody = document.getElementById('draft-preview-tbody');
   tbody.innerHTML = drafts.map(function(d, i) {
-    const snippet = d.body.length > 80 ? d.body.substring(0, 80) + '\u2026' : d.body;
+    const plain   = htmlToText(d.body);
+    const snippet = plain.length > 80 ? plain.substring(0, 80) + '\u2026' : plain;
     return '<tr>'
       + '<td>' + (i + 1) + '</td>'
       + '<td>' + escHtml(d.supplier || '\u2014') + '</td>'
@@ -1492,41 +1697,53 @@ function renderDraftPreview() {
 //   3. Send a [PROOF] copy of drafts[0] to PROOF_EMAIL
 //   4. If proof succeeds, unlock Send All (Step 4)
 // ═══════════════════════════════════════════════════════════════════════════════
-async function generateAndSendProof() {
+// Validate the compose form and (re)build drafts[] from it. Shared by the proof
+// flow (Send All) and the Create Drafts flow. Warnings go to the element id
+// passed in so each button surfaces errors next to itself.
+// Returns { ok:true, active, bodyHtml, sigHtml } or { ok:false }.
+function prepareDrafts(warnId) {
+  const warn    = document.getElementById(warnId);
+  const setWarn = function(m) { if (warn) warn.textContent = m; };
   const subject = (document.getElementById('email-subject').value || '').trim();
-  const body    = (document.getElementById('email-body').value    || '').trim();
-  const warn    = document.getElementById('gen-warning');
-  warn.textContent = '';
+  const editor  = document.getElementById('email-body');
+  const bodyHtml = editor.innerHTML;
+  const bodyText = (editor.innerText || '').replace(/\u00a0/g, ' ').trim();
+  setWarn('');
 
-  if (!subject) { warn.textContent = '⚠ Please enter a subject line first.'; document.getElementById('email-subject').focus(); return; }
-  if (!body)    { warn.textContent = '⚠ Please write an email body first.';  document.getElementById('email-body').focus();    return; }
+  if (!subject)  { setWarn('⚠ Please enter a subject line first.'); document.getElementById('email-subject').focus(); return { ok: false }; }
+  if (!bodyText) { setWarn('⚠ Please write an email body first.');  editor.focus(); return { ok: false }; }
   if (!recipients.length) {
-    warn.textContent = '⚠ No recipients loaded — upload your Excel file first.';
+    setWarn('⚠ No recipients loaded — upload your Excel file first.');
     const uz = document.getElementById('upload-zone');
     uz.style.borderColor = 'var(--accent)';
     uz.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setTimeout(() => { uz.style.borderColor = ''; }, 3000);
-    return;
+    return { ok: false };
   }
-  if (!accessToken) { warn.textContent = '⚠ Please connect Outlook first (top right).'; return; }
+  if (!accessToken) { setWarn('⚠ Please connect Outlook first (top right).'); return { ok: false }; }
 
   const active = recipients.filter(r => r.included && r.email.includes('@'));
-  if (!active.length) { warn.textContent = '⚠ No valid recipients selected.'; return; }
+  if (!active.length) { setWarn('⚠ No valid recipients selected.'); return { ok: false }; }
 
   const sigHtml = getSelectedSigHtml();
-
   drafts = active.map(r => ({
     to: r.email, supplier: r.supplier,
     subject:  buildSubject(r),
-    body:     renderBody(r, body),
+    body:     renderBody(r, bodyHtml),
     sigHtml,
     sent: false, failed: false
   }));
-
   renderDraftPreview();
-
   document.getElementById('sn2').className = 'step-num done';
   document.getElementById('sn3').className = 'step-num active';
+  return { ok: true, active, bodyHtml, sigHtml };
+}
+
+async function generateAndSendProof() {
+  const prep = prepareDrafts('gen-warning');
+  if (!prep.ok) return;
+  const active  = prep.active;
+  const sigHtml = prep.sigHtml;
 
   // Build proof with TEST data (not a real recipient's details)
   const proofRecipient = {
@@ -1538,7 +1755,7 @@ async function generateAndSendProof() {
     included:   true
   };
   const proofSubject = '[PROOF] ' + buildSubject(proofRecipient);
-  const proofBody    = renderBody(proofRecipient, body);
+  const proofBody    = renderBody(proofRecipient, prep.bodyHtml);
   const proofHtml    = buildEmailHtml(proofBody, sigHtml);
 
   showProgress();
@@ -1646,6 +1863,94 @@ async function sendRaw(to, subject, htmlContent) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// CORE DRAFT — Microsoft Graph API
+// POST /v1.0/me/messages creates a message in the Drafts folder WITHOUT sending.
+// Same body/attachments/CC/BCC shape as sendRaw, minus saveToSentItems.
+// The user opens Outlook → Drafts to review, edit and send each one manually.
+// ═══════════════════════════════════════════════════════════════════════════════
+async function createDraftRaw(to, subject, htmlContent) {
+  if (!accessToken) { logMsg('⚠ Not connected to Outlook.', 'err'); return false; }
+  try {
+    const msgAttachments = await Promise.all(attachments.map(async file => {
+      const b64 = await fileToBase64(file);
+      return { '@odata.type': '#microsoft.graph.fileAttachment', name: file.name, contentBytes: b64, contentType: getMime(file) };
+    }));
+    const response = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subject,
+        body: { contentType: 'HTML', content: htmlContent },
+        toRecipients: [{ emailAddress: { address: to } }],
+        ccRecipients:  parseEmailList((document.getElementById('email-cc')  || {}).value || ''),
+        bccRecipients: parseEmailList((document.getElementById('email-bcc') || {}).value || ''),
+        attachments: msgAttachments
+      })
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        accessToken = null; userEmail = '';
+        try { sessionStorage.removeItem('mm_access_token'); sessionStorage.removeItem('mm_token_time'); } catch(e2) {}
+        updateAuthUI(false);
+        logMsg('⚠ Outlook session expired — please click "Connect Outlook" to reconnect, then try again.', 'err');
+        return false;
+      }
+      logMsg('❌ Draft failed: ' + to + ' — ' + ((err.error && err.error.message) || 'HTTP ' + response.status), 'err');
+      return false;
+    }
+    logMsg('📝 Draft created: ' + to, 'ok');
+    return true;
+  } catch(e) { logMsg('❌ Error: ' + e.message, 'err'); return false; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CREATE DRAFTS — build every email as an Outlook draft (manual-send workflow)
+// ─────────────────────────────────────────────────────────────────────────────
+// Validates + builds drafts[] (no proof needed — nothing is sent), then creates
+// one Outlook draft per recipient. Respects abortFlag and the throttle delay.
+// ═══════════════════════════════════════════════════════════════════════════════
+async function createAllDrafts() {
+  const prep = prepareDrafts('drafts-warning');
+  if (!prep.ok) return;
+  const total = drafts.length;
+  if (!confirm('Create ' + total + ' draft' + (total === 1 ? '' : 's') + ' in your Outlook Drafts folder?\n\nNothing will be sent — you can review, edit and send each one manually.')) return;
+
+  abortFlag = false; isPaused = false;
+  let created = 0, failed = 0;
+  showProgress();
+  document.getElementById('completion-banner').style.display = 'none';
+  document.getElementById('drafts-done-box').classList.remove('visible');
+  const btn  = document.getElementById('btn-create-drafts');
+  const stop = document.getElementById('btn-stop-drafts');
+  btn.disabled = true; btn.textContent = '⏳ Creating drafts…';
+  stop.style.display = '';
+
+  logMsg('📝 Creating ' + total + ' draft(s) in Outlook…', 'info');
+
+  for (let i = 0; i < drafts.length; i++) {
+    if (abortFlag) { logMsg('⛔ Stopped after ' + created + ' draft(s).', 'warn'); break; }
+    updateProgress(i, total, drafts[i].to, 'Drafting');
+    const html = buildEmailHtml(drafts[i].body, drafts[i].sigHtml);
+    const ok   = await createDraftRaw(drafts[i].to, drafts[i].subject, html);
+    if (ok) { drafts[i].drafted = true; created++; } else { failed++; }
+    const delay = parseInt(document.getElementById('send-delay').value);
+    if (delay > 0 && i < drafts.length - 1) await sleep(delay);
+  }
+
+  stop.style.display = 'none';
+  btn.disabled = false; btn.textContent = '📝 Create Drafts';
+  updateProgress(created + failed, total, 'Complete');
+  if (created > 0) document.getElementById('drafts-done-box').classList.add('visible');
+  finaliseDrafts(created, failed);
+}
+
+function abortDrafts() {
+  abortFlag = true;
+  logMsg('⛔ Stopping draft creation…', 'warn');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // PROGRESS UI
 // ═══════════════════════════════════════════════════════════════════════════════
 function showProgress() {
@@ -1653,11 +1958,11 @@ function showProgress() {
   sec.style.display = '';
   sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
-function updateProgress(done, total, current) {
+function updateProgress(done, total, current, verb) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   document.getElementById('progress-fill').style.width  = pct + '%';
   document.getElementById('progress-badge').textContent = pct + '%';
-  document.getElementById('progress-label').textContent = done < total ? 'Sending to: ' + current : 'Complete!';
+  document.getElementById('progress-label').textContent = done < total ? (verb || 'Sending to') + ': ' + current : 'Complete!';
   document.getElementById('progress-count').textContent = done + ' / ' + total;
 }
 function updateLastSentBanner() {
@@ -1687,11 +1992,32 @@ function finaliseSend(total) {
   logMsg('✅ Complete. Sent: ' + sentCount + ' | Failed: ' + failedCount, 'ok');
   const banner = document.getElementById('completion-banner');
   banner.style.display = '';
+  document.getElementById('completion-title').textContent = '✅ Send Complete';
+  document.getElementById('comp-l-sent').textContent    = 'Sent';
+  document.getElementById('comp-l-failed').textContent  = 'Failed';
+  document.getElementById('comp-l-skipped').textContent = 'Skipped';
   document.getElementById('comp-sent').textContent    = sentCount;
   document.getElementById('comp-failed').textContent  = failedCount;
   document.getElementById('comp-skipped').textContent = 0;
   document.getElementById('completion-msg').textContent =
     'Finished ' + total + ' email(s). ' + (failedCount > 0 ? failedCount + ' failed — see log.' : 'All delivered successfully.');
+}
+
+function finaliseDrafts(created, failed) {
+  logMsg('─────────────────────────────────', 'info');
+  logMsg('✅ Done. Drafts created: ' + created + ' | Failed: ' + failed, 'ok');
+  const banner = document.getElementById('completion-banner');
+  banner.style.display = '';
+  document.getElementById('completion-title').textContent = '📝 Drafts Created';
+  document.getElementById('comp-l-sent').textContent    = 'Created';
+  document.getElementById('comp-l-failed').textContent  = 'Failed';
+  document.getElementById('comp-l-skipped').textContent = 'Skipped';
+  document.getElementById('comp-sent').textContent    = created;
+  document.getElementById('comp-failed').textContent  = failed;
+  document.getElementById('comp-skipped').textContent = 0;
+  document.getElementById('completion-msg').textContent = failed > 0
+    ? created + ' draft(s) created — ' + failed + ' failed (see log). Open Outlook → Drafts to review and send.'
+    : created + ' draft(s) created in your Outlook Drafts folder. Open Outlook to review, edit and send each one.';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1704,12 +2030,17 @@ function resetAll() {
   isPaused = false; abortFlag = false;
   document.getElementById('file-input').value    = '';
   document.getElementById('email-subject').value = '';
-  document.getElementById('email-body').value    = '';
+  document.getElementById('email-body').innerHTML = '';
   document.getElementById('supplier-toggle').checked = false;
   if (document.getElementById('email-cc'))  document.getElementById('email-cc').value  = '';
   if (document.getElementById('email-bcc')) document.getElementById('email-bcc').value = '';
   document.getElementById('subject-preview').textContent = '';
   document.getElementById('gen-warning').textContent = '';
+  document.getElementById('drafts-warning').textContent = '';
+  document.getElementById('drafts-done-box').classList.remove('visible');
+  document.getElementById('btn-stop-drafts').style.display = 'none';
+  document.getElementById('btn-create-drafts').disabled = false;
+  document.getElementById('btn-create-drafts').textContent = '📝 Create Drafts';
   try { sessionStorage.removeItem('mm_formstate'); localStorage.removeItem('mm_formstate'); } catch(e) {}
   ['recipients-card','progress-section','stats-section','draft-preview-section'].forEach(id => { document.getElementById(id).style.display = 'none'; });
   document.getElementById('draft-preview-tbody').innerHTML = '';

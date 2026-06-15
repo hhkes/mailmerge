@@ -1662,7 +1662,15 @@ function bodyHtmlToEmail(html) {
       } else if (child.nodeType === 1) {
         const tag = child.tagName.toUpperCase();
         if (tag === 'TABLE') {
-          s += '\n' + child.outerHTML.replace(/[\r\n]+/g, ' ') + '\n';
+          // Force clean grey gridlines so the table always shows borders in the
+          // email, regardless of what Excel supplied (partial / windowtext / none).
+          // Background fills, bold and alignment on the cells are left untouched.
+          child.style.borderCollapse = 'collapse';
+          child.querySelectorAll('td,th').forEach(function(cell) {
+            cell.style.border = '1px solid #cccccc';
+            if (!cell.style.padding) cell.style.padding = '4px 8px';
+          });
+          s += '\n' + child.outerHTML.replace(/[\r\n]+/g, ' ') + '\n';
         } else if (tag === 'BR') {
           s += '\n';
         } else if (BLOCK[tag]) {

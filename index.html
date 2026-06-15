@@ -723,31 +723,6 @@ tr:hover td { background: #f9f5ef; }
       </div>
     </div>
 
-    <!-- Create Drafts (manual-send alternative to Send All) -->
-    <div class="section-card" id="create-drafts-card">
-      <div class="card-header">
-        <h3>Create Drafts</h3>
-        <span class="badge">MANUAL SEND</span>
-      </div>
-      <div class="card-body">
-        <div class="proof-step" style="background:#fbf6e8;border-color:#e6d9a8;">
-          <div class="proof-step-num" style="background:var(--gold);">✎</div>
-          <div class="proof-step-body">
-            <strong>Generate all emails as Outlook drafts</strong>
-            <p>Creates a personalised draft for every selected recipient in your Outlook <strong>Drafts</strong> folder. Nothing is sent — open each one in Outlook to review, edit and send manually. No proof required.</p>
-            <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-              <button class="btn btn-amber"   id="btn-create-drafts" onclick="createAllDrafts()">📝 Create Drafts</button>
-              <button class="btn btn-outline"  id="btn-stop-drafts"   onclick="abortDrafts()" style="display:none;">✕ Stop</button>
-              <span id="drafts-warning" style="font-size:12px;color:var(--accent);"></span>
-            </div>
-            <div class="proof-sent-box" id="drafts-done-box" style="margin-top:10px;">
-              ✓ Drafts created — open Outlook → <strong>Drafts</strong> to review, edit and send each one manually.
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Draft Preview -->
     <div class="section-card" id="draft-preview-section">
       <div class="card-header">
@@ -844,8 +819,7 @@ const PROOF_EMAIL  = 'hegertonsmith' + '@' + 'cultwines.com';
 const MS_CLIENT_ID = 'dd4f1e8b-905c-4d47-8adb-29b071a2aee3';
 const MS_TENANT_ID = 'be753f7a-5a0a-4bc2-ac71-5aeba08f237f';
 const MS_REDIRECT  = 'https://hhkes.github.io/mailmerge';
-// Mail.Send → Send All; Mail.ReadWrite → Create Drafts (POST /me/messages); User.Read → profile
-const MS_SCOPE     = 'Mail.Send Mail.ReadWrite User.Read';
+const MS_SCOPE     = 'Mail.Send User.Read';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STATE
@@ -1698,9 +1672,8 @@ function renderDraftPreview() {
 //   3. Send a [PROOF] copy of drafts[0] to PROOF_EMAIL
 //   4. If proof succeeds, unlock Send All (Step 4)
 // ═══════════════════════════════════════════════════════════════════════════════
-// Validate the compose form and (re)build drafts[] from it. Shared by the proof
-// flow (Send All) and the Create Drafts flow. Warnings go to the element id
-// passed in so each button surfaces errors next to itself.
+// Validate the compose form and (re)build drafts[] from it, ready for the proof
+// + Send All flow. Warnings go to the element id passed in.
 // Returns { ok:true, active, bodyHtml, sigHtml } or { ok:false }.
 function prepareDrafts(warnId) {
   const warn    = document.getElementById(warnId);
@@ -1864,98 +1837,6 @@ async function sendRaw(to, subject, htmlContent) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CORE DRAFT — Microsoft Graph API
-// POST /v1.0/me/messages creates a message in the Drafts folder WITHOUT sending.
-// Same body/attachments/CC/BCC shape as sendRaw, minus saveToSentItems.
-// The user opens Outlook → Drafts to review, edit and send each one manually.
-// ═══════════════════════════════════════════════════════════════════════════════
-async function createDraftRaw(to, subject, htmlContent) {
-  if (!accessToken) { logMsg('⚠ Not connected to Outlook.', 'err'); return false; }
-  try {
-    const msgAttachments = await Promise.all(attachments.map(async file => {
-      const b64 = await fileToBase64(file);
-      return { '@odata.type': '#microsoft.graph.fileAttachment', name: file.name, contentBytes: b64, contentType: getMime(file) };
-    }));
-    const response = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        subject,
-        body: { contentType: 'HTML', content: htmlContent },
-        toRecipients: [{ emailAddress: { address: to } }],
-        ccRecipients:  parseEmailList((document.getElementById('email-cc')  || {}).value || ''),
-        bccRecipients: parseEmailList((document.getElementById('email-bcc') || {}).value || ''),
-        attachments: msgAttachments
-      })
-    });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      if (response.status === 401) {
-        accessToken = null; userEmail = '';
-        try { sessionStorage.removeItem('mm_access_token'); sessionStorage.removeItem('mm_token_time'); } catch(e2) {}
-        updateAuthUI(false);
-        logMsg('⚠ Outlook session expired — please click "Connect Outlook" to reconnect, then try again.', 'err');
-        return false;
-      }
-      if (response.status === 403) {
-        logMsg('⚠ Permission needed to save drafts (Mail.ReadWrite). Click "Disconnect" then "Connect Outlook" again and accept the access request.', 'err');
-        return false;
-      }
-      logMsg('❌ Draft failed: ' + to + ' — ' + ((err.error && err.error.message) || 'HTTP ' + response.status), 'err');
-      return false;
-    }
-    logMsg('📝 Draft created: ' + to, 'ok');
-    return true;
-  } catch(e) { logMsg('❌ Error: ' + e.message, 'err'); return false; }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// CREATE DRAFTS — build every email as an Outlook draft (manual-send workflow)
-// ─────────────────────────────────────────────────────────────────────────────
-// Validates + builds drafts[] (no proof needed — nothing is sent), then creates
-// one Outlook draft per recipient. Respects abortFlag and the throttle delay.
-// ═══════════════════════════════════════════════════════════════════════════════
-async function createAllDrafts() {
-  const prep = prepareDrafts('drafts-warning');
-  if (!prep.ok) return;
-  const total = drafts.length;
-  if (!confirm('Create ' + total + ' draft' + (total === 1 ? '' : 's') + ' in your Outlook Drafts folder?\n\nNothing will be sent — you can review, edit and send each one manually.')) return;
-
-  abortFlag = false; isPaused = false;
-  let created = 0, failed = 0;
-  showProgress();
-  document.getElementById('completion-banner').style.display = 'none';
-  document.getElementById('drafts-done-box').classList.remove('visible');
-  const btn  = document.getElementById('btn-create-drafts');
-  const stop = document.getElementById('btn-stop-drafts');
-  btn.disabled = true; btn.textContent = '⏳ Creating drafts…';
-  stop.style.display = '';
-
-  logMsg('📝 Creating ' + total + ' draft(s) in Outlook…', 'info');
-
-  for (let i = 0; i < drafts.length; i++) {
-    if (abortFlag) { logMsg('⛔ Stopped after ' + created + ' draft(s).', 'warn'); break; }
-    updateProgress(i, total, drafts[i].to, 'Drafting');
-    const html = buildEmailHtml(drafts[i].body, drafts[i].sigHtml);
-    const ok   = await createDraftRaw(drafts[i].to, drafts[i].subject, html);
-    if (ok) { drafts[i].drafted = true; created++; } else { failed++; }
-    const delay = parseInt(document.getElementById('send-delay').value);
-    if (delay > 0 && i < drafts.length - 1) await sleep(delay);
-  }
-
-  stop.style.display = 'none';
-  btn.disabled = false; btn.textContent = '📝 Create Drafts';
-  updateProgress(created + failed, total, 'Complete');
-  if (created > 0) document.getElementById('drafts-done-box').classList.add('visible');
-  finaliseDrafts(created, failed);
-}
-
-function abortDrafts() {
-  abortFlag = true;
-  logMsg('⛔ Stopping draft creation…', 'warn');
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // PROGRESS UI
 // ═══════════════════════════════════════════════════════════════════════════════
 function showProgress() {
@@ -2008,23 +1889,6 @@ function finaliseSend(total) {
     'Finished ' + total + ' email(s). ' + (failedCount > 0 ? failedCount + ' failed — see log.' : 'All delivered successfully.');
 }
 
-function finaliseDrafts(created, failed) {
-  logMsg('─────────────────────────────────', 'info');
-  logMsg('✅ Done. Drafts created: ' + created + ' | Failed: ' + failed, 'ok');
-  const banner = document.getElementById('completion-banner');
-  banner.style.display = '';
-  document.getElementById('completion-title').textContent = '📝 Drafts Created';
-  document.getElementById('comp-l-sent').textContent    = 'Created';
-  document.getElementById('comp-l-failed').textContent  = 'Failed';
-  document.getElementById('comp-l-skipped').textContent = 'Skipped';
-  document.getElementById('comp-sent').textContent    = created;
-  document.getElementById('comp-failed').textContent  = failed;
-  document.getElementById('comp-skipped').textContent = 0;
-  document.getElementById('completion-msg').textContent = failed > 0
-    ? created + ' draft(s) created — ' + failed + ' failed (see log). Open Outlook → Drafts to review and send.'
-    : created + ' draft(s) created in your Outlook Drafts folder. Open Outlook to review, edit and send each one.';
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // RESET
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2041,11 +1905,6 @@ function resetAll() {
   if (document.getElementById('email-bcc')) document.getElementById('email-bcc').value = '';
   document.getElementById('subject-preview').textContent = '';
   document.getElementById('gen-warning').textContent = '';
-  document.getElementById('drafts-warning').textContent = '';
-  document.getElementById('drafts-done-box').classList.remove('visible');
-  document.getElementById('btn-stop-drafts').style.display = 'none';
-  document.getElementById('btn-create-drafts').disabled = false;
-  document.getElementById('btn-create-drafts').textContent = '📝 Create Drafts';
   try { sessionStorage.removeItem('mm_formstate'); localStorage.removeItem('mm_formstate'); } catch(e) {}
   ['recipients-card','progress-section','stats-section','draft-preview-section'].forEach(id => { document.getElementById(id).style.display = 'none'; });
   document.getElementById('draft-preview-tbody').innerHTML = '';

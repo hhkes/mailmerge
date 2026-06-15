@@ -844,7 +844,8 @@ const PROOF_EMAIL  = 'hegertonsmith' + '@' + 'cultwines.com';
 const MS_CLIENT_ID = 'dd4f1e8b-905c-4d47-8adb-29b071a2aee3';
 const MS_TENANT_ID = 'be753f7a-5a0a-4bc2-ac71-5aeba08f237f';
 const MS_REDIRECT  = 'https://hhkes.github.io/mailmerge';
-const MS_SCOPE     = 'Mail.Send User.Read';
+// Mail.Send → Send All; Mail.ReadWrite → Create Drafts (POST /me/messages); User.Read → profile
+const MS_SCOPE     = 'Mail.Send Mail.ReadWrite User.Read';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // STATE
@@ -1894,6 +1895,10 @@ async function createDraftRaw(to, subject, htmlContent) {
         try { sessionStorage.removeItem('mm_access_token'); sessionStorage.removeItem('mm_token_time'); } catch(e2) {}
         updateAuthUI(false);
         logMsg('⚠ Outlook session expired — please click "Connect Outlook" to reconnect, then try again.', 'err');
+        return false;
+      }
+      if (response.status === 403) {
+        logMsg('⚠ Permission needed to save drafts (Mail.ReadWrite). Click "Disconnect" then "Connect Outlook" again and accept the access request.', 'err');
         return false;
       }
       logMsg('❌ Draft failed: ' + to + ' — ' + ((err.error && err.error.message) || 'HTTP ' + response.status), 'err');

@@ -672,7 +672,7 @@ tr:hover td { background: #f9f5ef; }
           </div>
           <div id="email-body" class="rich-editor" contenteditable="true"
             data-placeholder="Write your email here. Use tokens above to personalise.&#10;&#10;Example:&#10;{{salutation}} {{name}},&#10;&#10;I hope this finds you well…"
-            oninput="saveFormState()" onpaste="handleBodyPaste(event)"></div>
+            oninput="saveFormStateSoon()" onpaste="handleBodyPaste(event)"></div>
           <p class="body-hint">📋 <strong>Tip:</strong> copy a range of cells in Excel and paste it straight into the body above — the table keeps its borders, fills and layout.</p>
         </div>
 
@@ -967,6 +967,16 @@ function saveFormState() {
     sessionStorage.setItem('mm_formstate', state);
     localStorage.setItem('mm_formstate', state);
   } catch(e) {}
+}
+
+// Debounced save for the rich body editor: serialising a large pasted table to
+// storage on every keystroke can make typing feel laggy/frozen, so coalesce
+// writes to once the user pauses. Critical saves (e.g. before the auth redirect)
+// still call saveFormState() directly, which reads the live DOM.
+let _saveFormTimer = null;
+function saveFormStateSoon() {
+  clearTimeout(_saveFormTimer);
+  _saveFormTimer = setTimeout(saveFormState, 300);
 }
 
 function loadFormState() {
@@ -1608,15 +1618,86 @@ function renderBody(r, rawBody) {
     .replace(/\{\{supplier\}\}/g,   escHtml(r.supplier || ''));
 }
 
+// Convert the rich-editor body into simple <br>-separated lines for email.
+// Why: the contenteditable wraps each line in <div>/<p> blocks; email clients
+// (esp. Outlook/OWA) add margins around those blocks, expanding the spacing.
+// We flatten blocks to single line breaks (collapsing runs of blank lines to
+// one), keep the pasted table as a block, and strip per-word font/size/colour
+// from the body text so the whole message uses ONE consistent font and colour
+// (fixes the first line looking different from the rest). Bold/italic/underline
+// and links are preserved.
+function bodyHtmlToEmail(html) {
+  if (!html) return '';
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const BLOCK = { DIV:1, P:1, H1:1, H2:1, H3:1, H4:1, H5:1, H6:1, LI:1, BLOCKQUOTE:1, UL:1, OL:1 };
+
+  // Serialise an inline node, keeping only bold/italic/underline/links.
+  function cleanInline(node) {
+    if (node.nodeType === 3) return escHtml(node.nodeValue.replace(/[\r\n]+/g, ' '));
+    if (node.nodeType !== 1) return '';
+    const tag = node.tagName.toUpperCase();
+    let inner = '';
+    node.childNodes.forEach(function(c) { inner += cleanInline(c); });
+    if (tag === 'B' || tag === 'STRONG') return '<b>' + inner + '</b>';
+    if (tag === 'I' || tag === 'EM')     return '<i>' + inner + '</i>';
+    if (tag === 'U')                     return '<u>' + inner + '</u>';
+    if (tag === 'A') {
+      const href = node.getAttribute('href') || '';
+      return /^(https?:|mailto:)/i.test(href) ? '<a href="' + escHtml(href) + '">' + inner + '</a>' : inner;
+    }
+    // span/font/other inline: preserve weight/style/underline from CSS, drop font+colour
+    const style = (node.getAttribute('style') || '').toLowerCase();
+    let open = '', close = '';
+    if (/font-weight\s*:\s*(bold|[6-9]00)/.test(style))      { open += '<b>'; close = '</b>' + close; }
+    if (/font-style\s*:\s*italic/.test(style))               { open += '<i>'; close = '</i>' + close; }
+    if (/text-decoration[^;]*underline/.test(style))         { open += '<u>'; close = '</u>' + close; }
+    return open + inner + close;
+  }
+
+  let s = '';
+  function walk(node) {
+    node.childNodes.forEach(function(child) {
+      if (child.nodeType === 3) {
+        s += escHtml(child.nodeValue.replace(/[\r\n]+/g, ' '));
+      } else if (child.nodeType === 1) {
+        const tag = child.tagName.toUpperCase();
+        if (tag === 'TABLE') {
+          s += '\n' + child.outerHTML.replace(/[\r\n]+/g, ' ') + '\n';
+        } else if (tag === 'BR') {
+          s += '\n';
+        } else if (BLOCK[tag]) {
+          s += '\n'; walk(child);
+        } else {
+          s += cleanInline(child);
+        }
+      }
+    });
+  }
+  walk(doc.body);
+
+  // Split into lines, trim outer blanks, collapse runs of blank lines to one.
+  let lines = s.split('\n');
+  while (lines.length && lines[0].replace(/<[^>]*>/g, '').trim() === '') lines.shift();
+  while (lines.length && lines[lines.length - 1].replace(/<[^>]*>/g, '').trim() === '') lines.pop();
+  const out = [];
+  let prevBlank = false;
+  lines.forEach(function(ln) {
+    const blank = !/<table/i.test(ln) && ln.replace(/<[^>]*>/g, '').trim() === '';
+    if (blank && prevBlank) return;
+    out.push(ln);
+    prevBlank = blank;
+  });
+  return out.join('<br>');
+}
+
 function buildEmailHtml(bodyHtml, sigHtml) {
-  // Wraps the (already-HTML) body with the chosen font/size/colour as defaults,
-  // and appends the signature HTML below with spacing but no dividing line.
-  // Pasted tables carry their own inline styles and override these defaults.
+  // Normalises the body to consistent spacing + one font/colour, wraps it with
+  // the chosen font/size/colour, and appends the signature below.
   const font   = (document.getElementById('body-font')   || {}).value || "Calibri,'Segoe UI',Arial,sans-serif";
   const size   = (document.getElementById('body-size')   || {}).value || '11pt';
   const colour = (document.getElementById('body-colour') || {}).value || '#000000';
   return '<div style="font-family:' + font + ';font-size:' + size + ';color:' + colour + ';">'
-    + bodyHtml
+    + bodyHtmlToEmail(bodyHtml)
     + (sigHtml ? '<br><br><div style="margin-top:14px;">' + sigHtml + '</div>' : '')
     + '</div>';
 }
